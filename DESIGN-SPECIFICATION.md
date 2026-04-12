@@ -1,4 +1,9 @@
-# OpenConext Private Key Agent
+# OpenConext Private Key Agent Design Specification
+
+**Project:** OpenConext Private-Key Agent  
+**Date:** 2026-04-10  
+**Version:** 1.0
+**Author:** Martin Roest <martin.roest@dawn.tech>  
 
 ## Introduction
 
@@ -156,17 +161,13 @@ For RSA PKCS#1 OAEP decryption, additional parameters are needed: the MGF1 hash 
 
 ### Authentication
 
-All endpoints except `/health` and `/health/backend/{backend_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `client_secret` values in the configuration using `hash_equals()` to prevent timing attacks.
+All endpoints except `/health` and `/health/backend/{backend_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `token` values in the configuration using `hash_equals()` to prevent timing attacks.
 
 > **This is a static pre-shared bearer token scheme, not OAuth 2.0 client credentials.**
 >
-> The `client_secret` value in the configuration is the bearer token itself — the exact string the client places in the `Authorization: Bearer <value>` header. There is no token endpoint and no client credentials exchange. Compare with OAuth2, where `client_secret` is a credential submitted to a token endpoint to *obtain* an access token; here it is the access token.
+> The `token` value in the configuration is the bearer token itself — the exact string the client places in the `Authorization: Bearer <value>` header. There is no token endpoint and no client credentials exchange.
 >
-> The config field name `client_secret` is intentionally retained to ease a future migration to OAuth2: in an OAuth2 setup, the `client_secret` would fulfil the same role (authenticating the client), but through a token endpoint rather than directly as a bearer token. When OAuth2 is added the authentication mechanism changes; the config field semantics stay consistent.
->
-> The field `client_keys` is a list of logical **key names** (matching `backend_key_name` values) that the client is authorised to use. It is not a set of cryptographic keys or client certificates.
-
-The intention is to make the agent usable in an OAuth 2.0 environment at a later date if needed.
+> The field `allowed_keys` is a list of logical **key names** (matching key `name` values) that the client is authorised to use. It is not a set of cryptographic keys or client certificates.
 
 ### `POST /sign/{key_name}`
 
@@ -229,7 +230,7 @@ Response `200`:
 
 ### `GET /health`
 
-No authentication required. Returns `200` if all backends are healthy, `500` otherwise.
+No authentication required. Returns `200` if all backends are healthy, `503` otherwise.
 
 Response `200`:
 
@@ -237,33 +238,46 @@ Response `200`:
 { "status": "OK" }
 ```
 
-Response `500`:
+Response `503`:
 
 ```json
 {
-  "status": 500,
+  "status": 503,
   "error": "server_error",
-  "message": "One or more backends are unhealthy"
+  "message": "One or more backends are unhealthy",
+  "unhealthy_backends": ["softhsm"]
 }
 ```
 
 ### `GET /health/backend/{backend_name}`
 
-No authentication required. Returns `200` if the specified backend is healthy, `500` otherwise.
+No authentication required. The `backend_name` path parameter must match the `name` field of a configured `backend_groups` entry (e.g. `openssl-signing`, `softhsm`).
+
+Returns `200` if all instances of the named backend are healthy, `503` if any instance is unhealthy, `404` if no backend with that name is registered.
 
 Response `200`:
 
 ```json
-{ "status": "OK" }
+{ "status": "OK", "backend_name": "softhsm" }
 ```
 
-Response `500`:
+Response `503`:
 
 ```json
 {
-  "status": 500,
+  "status": 503,
   "error": "server_error",
-  "message": "Backend is unhealthy"
+  "message": "Backend is unhealthy",
+  "backend_name": "softhsm"
+}
+```
+
+Response `404`:
+
+```json
+{
+  "status": "not_found",
+  "backend_name": "unknown-name"
 }
 ```
 
@@ -294,9 +308,9 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 
 | HTTP Status | Error Code | Cause |
 |---|---|---|
-| 400 | `invalid_request` | Missing or invalid request parameter |
+| 400 | `invalid_request` | Missing or invalid request parameter, or key not registered for the requested operation |
 | 401 | `invalid_token` | Missing or invalid bearer token |
-| 403 | `access_denied` | Unknown key, unknown client, or client not permitted to use the key |
+| 403 | `access_denied` | Client not permitted to use the key |
 | 500 | `server_error` | Backend failure (OpenSSL or PKCS#11 error) |
 
 ---
@@ -309,44 +323,54 @@ The agent configuration is loaded from a YAML file at runtime. The path is set v
 
 ### Environment variable references
 
-Sensitive values (`client_secret`, `backend_pkcs11_pin`, `backend_key_passphrase`) may be stored as plaintext or as Symfony environment variable references using the `%env(VAR)%` syntax.
+The path to the configuration file is read from the `PRIVATE_KEY_AGENT_CONFIG` environment variable, resolved by Symfony's DI container via `services.yaml`.
+
+Values inside the config file (e.g. `token`, `pkcs11_pin`) are plain strings — `ConfigLoader` uses `Symfony\Component\Yaml::parseFile()` directly and does **not** resolve `%env(...)%` references. Sensitive values must be supplied as plaintext strings or via a secrets management solution external to the agent (e.g. a mounted secrets file, Docker/Kubernetes secrets written to the config file on startup).
 
 ### Example config file
 
 ```yaml
 agent_name: my-private-key-agent
 
-backends:
-  - backend_name: software-backend
-    backend_type: openssl
-    keys:
-      - backend_key_type: rsa
-        backend_key_name: my-signing-key
-        backend_key_operations: [sign, decrypt]
-        backend_key_file: /etc/private-key-agent/keys/signing.pem
-        backend_key_passphrase: '%env(SIGNING_KEY_PASSPHRASE)%'
+backend_groups:
+  - name: software-backend
+    type: openssl
+    key_path: /etc/private-key-agent/keys/signing.pem
 
-  - backend_name: hsm-backend
-    backend_type: pkcs11
-    backend_pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    backend_pkcs11_slot: 0
-    backend_pkcs11_pin: '%env(HSM_PIN)%'
-    backend_environment:
+  - name: hsm-signing-backend
+    type: pkcs11
+    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
+    pkcs11_slot: 0
+    pkcs11_pin: "hsm-pin-value"
+    pkcs11_key_label: signing-key
+    environment:
       SOFTHSM2_CONF: /etc/softhsm2.conf
-    keys:
-      - backend_key_type: rsa
-        backend_key_name: my-signing-key
-        backend_key_operations: [sign]
-        backend_key_pkcs11_label: signing-key
-      - backend_key_type: rsa
-        backend_key_name: my-decryption-key
-        backend_key_operations: [decrypt]
-        backend_key_pkcs11_key_id: "01"
+
+  - name: hsm-decryption-backend
+    type: pkcs11
+    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
+    pkcs11_slot: 1
+    pkcs11_pin: "hsm-pin-value"
+    pkcs11_key_id: "02"
+    environment:
+      SOFTHSM2_CONF: /etc/softhsm2.conf
+
+keys:
+  - name: my-signing-key
+    signing_backends:
+      - hsm-signing-backend
+    decryption_backends:
+      - software-backend
+
+  - name: my-decryption-key
+    signing_backends: []
+    decryption_backends:
+      - hsm-decryption-backend
 
 clients:
-  - client_name: simplesamlphp
-    client_secret: '%env(CLIENT_SSP_SECRET)%'
-    client_keys:
+  - name: simplesamlphp
+    token: "bearer-token-value"
+    allowed_keys:
       - my-signing-key
       - my-decryption-key
 ```
@@ -357,37 +381,41 @@ clients:
 
 - `agent_name`: The name of this agent. Used in `WWW-Authenticate` response headers as the `realm` value.
 
-#### Backend
+#### Backend Groups
 
-One or more backends can be defined. Each backend groups one or more private keys under a single backend type (OpenSSL or PKCS#11). When the same key name appears in multiple backends, the agent distributes requests across those backends round-robin — useful when the same key is available on multiple HSMs for performance or redundancy.
+Each entry in `backend_groups` represents a single cryptographic backend holding exactly one private key. Keys (defined in the `keys` section) reference one or more backend groups by name, forming a logical key identity that can be served by multiple backends for round-robin load distribution.
 
-- `backend_name`: Unique name for the backend.
-- `backend_type`: `openssl` or `pkcs11`.
-- `backend_environment`: *(optional)* A map of environment variable names to values. These variables are set before the backend is initialised, allowing vendor-specific configuration (e.g. `SOFTHSM2_CONF`, `ChrystokiConfigurationPath`) to be co-located with the backend definition. Values support `%env(...)%` references.
+- `name`: Unique name for the backend group. Referenced from key `signing_backends` / `decryption_backends`.
+- `type`: `openssl` or `pkcs11`.
+- `environment`: *(optional)* A map of environment variable names to string values. For PKCS#11 backends these variables are set via `putenv()` before the PKCS#11 module is loaded, allowing vendor-specific configuration (e.g. `SOFTHSM2_CONF`, `ChrystokiConfigurationPath`) to be co-located with the backend definition. Ignored by OpenSSL backends.
+
+OpenSSL-specific options:
+
+- `key_path`: Path to a PEM private key file. Only RSA keys are supported; the backend validates at startup that the loaded key is RSA and throws a `BackendException` otherwise.
 
 PKCS#11-specific options:
 
-- `backend_pkcs11_lib`: Path to the PKCS#11 shared library.
-- `backend_pkcs11_slot`: PKCS#11 slot number.
-- `backend_pkcs11_pin`: *(optional)* PIN to authenticate to the token. Supports `%env(...)%`.
+- `pkcs11_lib`: Path to the PKCS#11 shared library (`.so` / `.dylib`).
+- `pkcs11_slot`: PKCS#11 slot number.
+- `pkcs11_pin`: *(optional)* PIN to authenticate to the token.
+- `pkcs11_key_label`: *(optional)* `CKA_LABEL` of the key object. At least one of `pkcs11_key_label` or `pkcs11_key_id` must be set.
+- `pkcs11_key_id`: *(optional)* `CKA_ID` of the key object. If both are set, both are used to find the key. Exactly one matching key must be found.
 
-#### Key
+#### Keys
 
-One or more keys can be configured under a backend.
+Each entry in `keys` defines a logical key identity that clients can reference. A key maps operations to one or more backend groups, decoupling the logical key name from the physical backend. This allows using an HSM backend for signing and an OpenSSL backend for decryption, or distributing load across multiple HSMs.
 
-- `backend_key_type`: `rsa`.
-- `backend_key_name`: Name used by clients to refer to this key. Must match `[a-zA-Z0-9_-]{1,64}`. Must be unique within a backend. The same name may appear in multiple backends, in which case the agent distributes load round-robin across those backends. All keys sharing a name must be the same private key. This allows multiple HSMs to serve the same key for performance or redundancy.
-- `backend_key_operations`: List of operations this key supports: `sign`, `decrypt`, or both (`[sign, decrypt]`). The registry only registers backends for the declared operations. Attempting an operation not listed returns `403 access_denied`. This is especially relevant for HSM keys where the token may enforce usage restrictions via `CKA_SIGN` / `CKA_DECRYPT` attributes.
-- `backend_key_file`: *(openssl only)* Path to a PEM RSA PRIVATE KEY file.
-- `backend_key_passphrase`: *(openssl, optional)* Passphrase for an encrypted PEM key file. Supports `%env(...)%`.
-- `backend_key_pkcs11_label`: *(pkcs11)* `CKA_LABEL` of the key.
-- `backend_key_pkcs11_key_id`: *(pkcs11)* `CKA_ID` of the key. At least one of label or key_id must be set. If both are set, both are used to find the key. Exactly one matching key must be found.
+- `name`: Logical key name. Used by clients in the request `key_name` field and in `allowed_keys`. Must be unique.
+- `signing_backends`: List of backend group `name` values that handle signing for this key. Multiple entries enable round-robin distribution across backends.
+- `decryption_backends`: List of backend group `name` values that handle decryption for this key. Multiple entries enable round-robin distribution across backends.
+
+**Round-robin high availability:** when multiple backend groups are listed for an operation, the agent cycles through them on successive requests. All backend groups listed for the same operation should hold the same private key material.
 
 #### Client
 
-- `client_name`: Name of the client. Used in logs for identification.
-- `client_secret`: The bearer token the client sends in `Authorization: Bearer <value>`. This is the token itself, not an OAuth2 client secret used to obtain a token. Compared using `hash_equals()` to prevent timing attacks. Supports `%env(...)%`.
-- `client_keys`: List of logical key names (matching `backend_key_name`) that this client is permitted to use. These are key identifiers, not cryptographic key material.
+- `name`: Name of the client. Used in logs for identification.
+- `token`: The bearer token the client sends in `Authorization: Bearer <value>`. This is the token itself, not an OAuth2 client secret used to obtain a token. Compared using `hash_equals()` to prevent timing attacks.
+- `allowed_keys`: List of logical key names (matching key `name` values) that this client is permitted to use. Use `["*"]` to grant access to all configured keys.
 
 ---
 
@@ -405,69 +433,98 @@ One or more keys can be configured under a backend.
 │   ├── routes.yaml
 │   └── services.yaml
 ├── docker/
-│   ├── php-fpm/
-│   │   └── Dockerfile
-│   └── caddy/
-│       └── Caddyfile
+│   ├── Dockerfile
+│   ├── Caddyfile
+│   ├── app.ini
+│   └── php-fpm.conf
 ├── compose.yaml
 ├── src/
 │   ├── Backend/
-│   │   ├── SigningBackendInterface.php
+│   │   ├── BackendFactory.php
+│   │   ├── BackendInterface.php
+│   │   ├── BackendTypeFactoryInterface.php
 │   │   ├── DecryptionBackendInterface.php
-│   │   ├── DigestInfoBuilder.php
-│   │   ├── OpenSsl/
-│   │   │   ├── OpenSslSigningBackend.php
-│   │   │   └── OpenSslDecryptionBackend.php
-│   │   └── Pkcs11/
-│   │       ├── Pkcs11SigningBackend.php
-│   │       └── Pkcs11DecryptionBackend.php
+│   │   ├── OpenSslBackendTypeFactory.php
+│   │   ├── OpenSslDecryptionBackend.php
+│   │   ├── OpenSslSigningBackend.php
+│   │   ├── Pkcs11BackendTypeFactory.php
+│   │   ├── Pkcs11DecryptionBackend.php
+│   │   ├── Pkcs11ModuleCache.php
+│   │   └── SigningBackendInterface.php
 │   ├── Command/
 │   │   └── ValidateConfigCommand.php
 │   ├── Config/
 │   │   ├── AgentConfig.php
 │   │   ├── BackendGroupConfig.php
-│   │   ├── KeyConfig.php
 │   │   ├── ClientConfig.php
-│   │   └── ConfigLoader.php
+│   │   ├── ConfigLoader.php
+│   │   ├── ConfigProvider.php
+│   │   └── KeyConfig.php
 │   ├── Controller/
-│   │   ├── SignController.php
 │   │   ├── DecryptController.php
-│   │   └── HealthController.php
+│   │   ├── HealthController.php
+│   │   └── SignController.php
+│   ├── Crypto/
+│   │   └── DigestInfoBuilder.php
 │   ├── Dto/
-│   │   ├── SignRequest.php
-│   │   └── DecryptRequest.php
-│   ├── Exception/
-│   │   ├── InvalidRequestException.php
-│   │   ├── AuthenticationException.php
-│   │   ├── AccessDeniedException.php
-│   │   └── BackendException.php
+│   │   ├── DecryptRequest.php
+│   │   └── SignRequest.php
 │   ├── EventSubscriber/
 │   │   └── ExceptionSubscriber.php
-│   ├── Registry/
-│   │   └── KeyRegistry.php
+│   ├── Exception/
+│   │   ├── AccessDeniedException.php
+│   │   ├── AuthenticationException.php
+│   │   ├── BackendException.php
+│   │   ├── InvalidConfigurationException.php
+│   │   └── InvalidRequestException.php
 │   ├── Security/
-│   │   ├── TokenAuthenticator.php
-│   │   └── AccessControlService.php
+│   │   ├── AccessControlInterface.php
+│   │   ├── AccessControlService.php
+│   │   ├── AuthenticatorInterface.php
+│   │   └── TokenAuthenticator.php
+│   ├── Service/
+│   │   ├── KeyRegistry.php
+│   │   ├── KeyRegistryBootstrapper.php
+│   │   └── KeyRegistryInterface.php
 │   └── Validator/
 │       ├── Base64.php
 │       └── Base64Validator.php
 ├── tests/
-│   ├── Backend/
-│   │   ├── OpenSsl/
-│   │   │   ├── OpenSslSigningBackendTest.php
-│   │   │   └── OpenSslDecryptionBackendTest.php
-│   │   └── Pkcs11/
-│   │       ├── Pkcs11SigningBackendTest.php
-│   │       └── Pkcs11DecryptionBackendTest.php
-│   ├── Controller/
-│   │   ├── SignControllerTest.php
-│   │   ├── DecryptControllerTest.php
-│   │   └── HealthControllerTest.php
-│   ├── Config/
-│   │   └── ConfigLoaderTest.php
-│   └── Security/
-│       ├── TokenAuthenticatorTest.php
-│       └── AccessControlServiceTest.php
+│   ├── bootstrap.php
+│   ├── Integration/
+│   │   └── Backend/
+│   │       ├── OpenSslDecryptionBackendTest.php
+│   │       ├── OpenSslSigningBackendTest.php
+│   │       ├── Pkcs11DecryptionBackendTest.php
+│   │       └── Pkcs11SigningBackendTest.php
+│   └── Unit/
+│       ├── Backend/
+│       │   ├── BackendFactoryTest.php
+│       │   ├── OpenSslBackendTypeFactoryTest.php
+│       │   └── Pkcs11BackendTypeFactoryTest.php
+│       ├── Command/
+│       │   └── ValidateConfigCommandTest.php
+│       ├── Config/
+│       │   └── ConfigLoaderTest.php
+│       ├── Controller/
+│       │   ├── DecryptControllerTest.php
+│       │   ├── HealthControllerTest.php
+│       │   └── SignControllerTest.php
+│       ├── Crypto/
+│       │   └── DigestInfoBuilderTest.php
+│       ├── Dto/
+│       │   ├── DecryptRequestTest.php
+│       │   └── SignRequestTest.php
+│       ├── EventSubscriber/
+│       │   └── ExceptionSubscriberTest.php
+│       ├── Security/
+│       │   ├── AccessControlServiceTest.php
+│       │   └── TokenAuthenticatorTest.php
+│       ├── Service/
+│       │   ├── KeyRegistryBootstrapperTest.php
+│       │   └── KeyRegistryTest.php
+│       └── Validator/
+│           └── Base64ValidatorTest.php
 └── composer.json
 ```
 
@@ -475,10 +532,13 @@ One or more keys can be configured under a backend.
 
 ## Key Components
 
+### `ConfigProvider`
+
+Thin singleton wrapper around `ConfigLoader`. Receives the config file path via Symfony DI as `$configPath: '%env(string:PRIVATE_KEY_AGENT_CONFIG)%'` (resolved from the `PRIVATE_KEY_AGENT_CONFIG` environment variable at container boot). Calls `ConfigLoader::load()` on first access and caches the result.
+
 ### `ConfigLoader`
 
-- Reads the YAML file at the path from `PRIVATE_KEY_AGENT_CONFIG`.
-- Resolves `%env(...)%` references.
+- Reads the YAML file at the path provided by `ConfigProvider` (which receives it from `PRIVATE_KEY_AGENT_CONFIG` via Symfony DI).
 - Throws on any error — no partial loading.
 - Invoked during Symfony kernel boot via service constructor.
 
@@ -487,49 +547,54 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 **Structural / required fields:**
 
 - `agent_name`: required, non-empty string.
-- At least one backend defined.
-- `backend_name`: required per backend; **unique across all backends**.
-- `backend_type`: required; must be `openssl` or `pkcs11`.
-- At least one key defined per backend.
-- `backend_key_type`: required; must be `rsa`.
-- `backend_key_name`: required; must match `[a-zA-Z0-9_-]{1,64}`; **unique within its backend**.
-- `backend_key_operations`: required; non-empty; each value must be `sign` or `decrypt`.
-- OpenSSL: `backend_key_file` required.
-- PKCS#11: `backend_pkcs11_lib` required; `backend_pkcs11_slot` required.
-- PKCS#11 key: at least one of `backend_key_pkcs11_label` or `backend_key_pkcs11_key_id` must be set.
-- At least one client defined.
-- `client_name`: required; **unique across all clients**.
-- `client_secret`: required; **must be non-empty** (an empty secret would authenticate blank-token requests — security issue).
-- `client_keys`: required; non-empty list.
+- At least one backend group defined in `backend_groups`.
+- `name`: required per backend group; **unique across all backend groups**.
+- `type`: required; must be `openssl` or `pkcs11`.
+- OpenSSL: `key_path` required.
+- PKCS#11: `pkcs11_lib` required; `pkcs11_slot` required.
+- PKCS#11 key: at least one of `pkcs11_key_label` or `pkcs11_key_id` must be set.
+- At least one key defined in `keys`.
+- `name`: required per key; must match `[a-zA-Z0-9_-]{1,64}`; **unique within keys**.
+- At least one client defined in `clients`.
+- `name`: required per client; **unique across all clients**.
+- `token`: required; **must be non-empty** (an empty token would authenticate blank-token requests — security issue).
+- `allowed_keys`: required; non-empty list.
 
 **Semantic / cross-reference checks:**
 
-- Every entry in every client's `client_keys` must match a `backend_key_name` defined in at least one backend. An orphaned reference (key name configured for a client but not present in any backend) is a configuration error that would otherwise only surface as a confusing request-time 4xx/5xx. This check is done here rather than in `KeyRegistry` because it requires no open connections and is a pure config-level assertion.
+- Every backend group referenced by a key's `signing_backends` or `decryption_backends` list must match a `name` defined in `backend_groups`. Orphaned backend references are rejected here rather than at request time.
+- Every backend group defined in `backend_groups` must be referenced by at least one key (`validateNoOrphanBackends`). An unreferenced backend group is treated as a configuration error.
 
-> `ValidateConfigCommand` reuses `ConfigLoader` for all of the above, then additionally checks that OpenSSL key files exist and are readable on disk and that PKCS#11 library paths exist — resource checks that require filesystem access but no open sessions or key loads.
+> `ValidateConfigCommand` reuses `ConfigLoader` for all of the above. Successful parsing means the config is structurally valid; it does not open key files or HSM sessions.
 
-### `KeyRegistry`
+> **RSA-only enforcement:** Only RSA private keys are currently supported. OpenSSL backends validate this at construction time (checking for an RSA modulus in the key details); PKCS#11 backends restrict key lookup using the `CKA_KEY_TYPE = CKK_RSA` attribute filter. A non-RSA key causes immediate failure with a `BackendException`.
 
-- Initialised at boot from loaded config.
-- Holds two separate maps: one for signing backends (key name → list of `SigningBackendInterface`) and one for decryption backends (key name → list of `DecryptionBackendInterface`).
+### `BackendFactory`
+
+Responsible for instantiating all backend objects at boot. Delegates per-type construction to `BackendTypeFactoryInterface` implementations (`OpenSslBackendTypeFactory`, `Pkcs11BackendTypeFactory`). Returns a map of backend group name → `BackendInterface`. After building all backends, passes the map to `KeyRegistryBootstrapper` to populate `KeyRegistry`.
+
+### `KeyRegistry` / `KeyRegistryBootstrapper`
+
+- `KeyRegistryBootstrapper` is invoked at boot from `AgentConfig` (via `BackendFactory`) and populates the `KeyRegistry` with resolved `SigningBackendInterface` and `DecryptionBackendInterface` instances.
+- `KeyRegistry` holds two separate maps: one for signing backends (key name → list of `SigningBackendInterface`) and one for decryption backends (key name → list of `DecryptionBackendInterface`).
 - Provides `getSigningBackend(string $keyName): SigningBackendInterface` and `getDecryptionBackend(string $keyName): DecryptionBackendInterface` methods.
-- Only registers backends for operations declared in `backend_key_operations`. If a key is not registered for the requested operation, the registry throws `AccessDeniedException`.
-- Implements round-robin selection across backends for a given key name using a per-key counter.
-- The counter is a static property (per PHP-FPM process); cross-process distribution is handled naturally by FPM.
+- If a key name is not registered for the requested operation, the registry throws `InvalidRequestException` (→ 400).
+- Implements round-robin selection across backends for a given key name using per-instance counter arrays (`$signingCounters`, `$decryptionCounters`). The counter resets on process restart; cross-process distribution is handled naturally by PHP-FPM assigning each request to a worker.
 - **Lazy key equivalence check**: on the first request for a given `key_name` that maps to multiple backends, asserts all `getPublicKeyFingerprint()` values are identical. Throws `InvalidConfigurationException` if any mismatch is detected, logging the offending key name and the differing fingerprints. This check is performed lazily inside the worker process, as PKCS#11 `C_Initialize` and session creation do not safely survive FPM's `fork()` from the master process.
 
 ### `TokenAuthenticator`
 
-- Implements Symfony `AbstractAuthenticator`.
+- Implements the custom `AuthenticatorInterface` (not Symfony's `AbstractAuthenticator`).
+- Is a plain Symfony service; controllers call `$this->authenticator->authenticate($token)` directly, bypassing the Symfony Security firewall.
 - Extracts the Bearer token from the `Authorization` header.
 - Iterates configured clients and compares tokens using `hash_equals()`.
-- Returns the matched `ClientConfig` as the authenticated user.
-- Returns an RFC 6750-compliant 401 response when authentication fails.
+- Returns the matched `ClientConfig` as the authenticated entity.
+- Throws `AuthenticationException` (→ 401 with `WWW-Authenticate` header) when authentication fails.
 
 ### `AccessControlService`
 
 - Called from `SignController` and `DecryptController` after authentication.
-- Checks whether the authenticated client's `client_keys` list includes the requested `key_name`.
+- Checks whether the authenticated client's `allowed_keys` list includes the requested `key_name`.
 - Throws `AccessDeniedException` if not.
 
 ### `ExceptionSubscriber`
@@ -548,6 +613,11 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 interface BackendInterface
 {
     /**
+     * Returns the backend group name (as configured in YAML).
+     */
+    public function getName(): string;
+
+    /**
      * Returns true if the backend is operational (key loaded, HSM session alive, etc.).
      */
     public function isHealthy(): bool;
@@ -562,12 +632,12 @@ interface BackendInterface
 
 interface SigningBackendInterface extends BackendInterface
 {
-    public function sign(string $algorithm, string $hash): string;
+    public function sign(string $hash, string $algorithm): string;
 }
 
 interface DecryptionBackendInterface extends BackendInterface
 {
-    public function decrypt(string $algorithm, string $encryptedData, ?string $label = null): string;
+    public function decrypt(string $ciphertext, string $algorithm, string|null $label = null): string;
 }
 ```
 
@@ -590,6 +660,8 @@ The DER prefixes are well-known constants from RFC 3447 §9.2 / PKCS#1:
 | SHA-512 | `3051300d060960864801650304020305000440` | 64 |
 
 `DigestInfoBuilder` is unit-tested independently using hardcoded input/output pairs, in addition to being implicitly validated by the OpenSSL and PKCS#11 integration tests which verify signatures against the public key.
+
+### `OpenSslSigningBackend`
 
 - Loads the PEM private key (with optional passphrase) at construction time.
 - Constructs the DigestInfo ASN.1 structure internally by delegating to `DigestInfoBuilder`.
@@ -618,15 +690,18 @@ The DER prefixes are well-known constants from RFC 3447 §9.2 / PKCS#1:
 - For OAEP algorithms, constructs `Pkcs11\RsaOaepParams` passing the hash algorithm, MGF1 algorithm, and optional label (source data) and bounds it to `Pkcs11\Mechanism`.
 - `isHealthy()` calls `C_GetSessionInfo` (opening the session first if needed).
 
+### `Pkcs11ModuleCache`
+
+Prevents double `C_Initialize` calls when multiple PKCS#11 backends share the same library (`.so` path) within a single PHP-FPM worker process. On the first use of a given library path, `C_Initialize` is called once; subsequent backends using the same path receive the already-initialised `Pkcs11\Module` instance from the cache.
+
 ### `ValidateConfigCommand`
 
-`bin/console private-key-agent:validate-config`
+`bin/console app:validate-config <config-path>`
 
-- Loads and validates the config file path from `PRIVATE_KEY_AGENT_CONFIG`.
-- Checks all required fields.
-- Verifies key files exist and are readable (OpenSSL backends).
-- Verifies PKCS#11 library paths exist (PKCS#11 backends).
-- Does not load keys or open HSM sessions.
+- Accepts a required `config-path` CLI argument.
+- Loads and validates the config file by calling `ConfigLoader::load($path)`.
+- Checks all required fields and semantic cross-references (see `ConfigLoader` section).
+- Does not check whether OpenSSL key files or PKCS#11 library paths exist on disk, and does not open key files or HSM sessions.
 - Exits with code 0 on success, 1 on failure with human-readable error output.
 
 ---
@@ -638,36 +713,56 @@ The DER prefixes are well-known constants from RFC 3447 §9.2 / PKCS#1:
 ### `SignRequest`
 
 ```php
-readonly class SignRequest
+final class SignRequest
 {
+    public const array ALGORITHMS = [
+        'rsa-pkcs1-v1_5-sha1',
+        'rsa-pkcs1-v1_5-sha256',
+        'rsa-pkcs1-v1_5-sha384',
+        'rsa-pkcs1-v1_5-sha512',
+    ];
+
+    private const array HASH_LENGTHS = [
+        'rsa-pkcs1-v1_5-sha1'   => 20,
+        'rsa-pkcs1-v1_5-sha256' => 32,
+        'rsa-pkcs1-v1_5-sha384' => 48,
+        'rsa-pkcs1-v1_5-sha512' => 64,
+    ];
+
     #[Assert\NotBlank]
-    #[Assert\Choice(['rsa-pkcs1-v1_5-sha1', 'rsa-pkcs1-v1_5-sha256', 'rsa-pkcs1-v1_5-sha384', 'rsa-pkcs1-v1_5-sha512'])]
-    public string $algorithm;
+    #[Assert\Choice(choices: self::ALGORITHMS, message: 'Invalid signing algorithm.')]
+    public string $algorithm = '';
 
     #[Assert\NotBlank]
     #[Assert\Base64]
-    public string $hash;
+    public string $hash = '';
 
     #[Assert\Callback]
     public function validateHashLength(ExecutionContextInterface $context): void
     {
-        $expectedLengths = [
-            'rsa-pkcs1-v1_5-sha1'   => 20,
-            'rsa-pkcs1-v1_5-sha256' => 32,
-            'rsa-pkcs1-v1_5-sha384' => 48,
-            'rsa-pkcs1-v1_5-sha512' => 64,
-        ];
-        if (!isset($expectedLengths[$this->algorithm])) {
+        if (!in_array($this->algorithm, self::ALGORITHMS, true)) {
             return; // algorithm already fails #[Assert\Choice]
         }
-        $decoded = base64_decode($this->hash, strict: true);
-        if ($decoded === false || strlen($decoded) !== $expectedLengths[$this->algorithm]) {
-            $context->buildViolation('hash must decode to {{ expected }} bytes for {{ algorithm }}.')
-                ->setParameter('{{ expected }}', (string) $expectedLengths[$this->algorithm])
-                ->setParameter('{{ algorithm }}', $this->algorithm)
-                ->atPath('hash')
-                ->addViolation();
+        if ($this->hash === '') {
+            return; // NotBlank will handle this
         }
+        $decoded = base64_decode($this->hash, strict: true);
+        if ($decoded === false) {
+            return; // Base64 validator will handle this
+        }
+        $expectedLength = self::HASH_LENGTHS[$this->algorithm];
+        $actualLength   = strlen($decoded);
+        if ($actualLength === $expectedLength) {
+            return;
+        }
+        $context->buildViolation(sprintf(
+            'Hash length %d bytes does not match expected %d bytes for %s.',
+            $actualLength,
+            $expectedLength,
+            $this->algorithm,
+        ))
+            ->atPath('hash')
+            ->addViolation();
     }
 }
 ```
@@ -675,44 +770,64 @@ readonly class SignRequest
 ### `DecryptRequest`
 
 ```php
-readonly class DecryptRequest
+final class DecryptRequest
 {
+    public const array ALGORITHMS = [
+        'rsa-pkcs1-v1_5',
+        'rsa-pkcs1-oaep-mgf1-sha1',
+        'rsa-pkcs1-oaep-mgf1-sha224',
+        'rsa-pkcs1-oaep-mgf1-sha256',
+        'rsa-pkcs1-oaep-mgf1-sha384',
+        'rsa-pkcs1-oaep-mgf1-sha512',
+    ];
+
+    private const array OAEP_ALGORITHMS = [
+        'rsa-pkcs1-oaep-mgf1-sha1',
+        'rsa-pkcs1-oaep-mgf1-sha224',
+        'rsa-pkcs1-oaep-mgf1-sha256',
+        'rsa-pkcs1-oaep-mgf1-sha384',
+        'rsa-pkcs1-oaep-mgf1-sha512',
+    ];
+
     #[Assert\NotBlank]
-    #[Assert\Choice(['rsa-pkcs1-v1_5', 'rsa-pkcs1-oaep-mgf1-sha1', 'rsa-pkcs1-oaep-mgf1-sha224', 'rsa-pkcs1-oaep-mgf1-sha256', 'rsa-pkcs1-oaep-mgf1-sha384', 'rsa-pkcs1-oaep-mgf1-sha512'])]
-    public string $algorithm;
+    #[Assert\Choice(choices: self::ALGORITHMS, message: 'Invalid decryption algorithm.')]
+    public string $algorithm = '';
 
     #[Assert\NotBlank]
     #[Assert\Base64]
     #[SerializedName('encrypted_data')]
-    public string $encryptedData;
+    public string $encryptedData = '';
 
     #[Assert\Base64]
-    public ?string $label = null;
+    public string|null $label = null;
 
     #[Assert\Callback]
-    public function validateCryptoConstraints(ExecutionContextInterface $context): void
+    public function validateRequest(ExecutionContextInterface $context): void
     {
-        // label is only meaningful for OAEP algorithms
-        $oaepAlgorithms = ['rsa-pkcs1-oaep-mgf1-sha1', 'rsa-pkcs1-oaep-mgf1-sha224',
-                           'rsa-pkcs1-oaep-mgf1-sha256', 'rsa-pkcs1-oaep-mgf1-sha384',
-                           'rsa-pkcs1-oaep-mgf1-sha512'];
-        if ($this->label !== null && !in_array($this->algorithm, $oaepAlgorithms, true)) {
-            $context->buildViolation('label is only valid for OAEP algorithms.')
-                ->atPath('label')
-                ->addViolation();
-        }
-
         // encrypted_data must decode to a plausible RSA ciphertext length (128–1024 bytes
         // covers RSA-1024 through RSA-8192; catches obviously malformed inputs early)
-        $decoded = base64_decode($this->encryptedData, strict: true);
-        if ($decoded !== false) {
-            $len = strlen($decoded);
-            if ($len < 128 || $len > 1024) {
-                $context->buildViolation('encrypted_data must decode to 128–1024 bytes (RSA ciphertext range).')
-                    ->atPath('encryptedData')
-                    ->addViolation();
+        if ($this->encryptedData !== '') {
+            $decoded = base64_decode($this->encryptedData, strict: true);
+            if ($decoded !== false) {
+                $len = strlen($decoded);
+                if ($len < 128 || $len > 1024) {
+                    $context->buildViolation(sprintf(
+                        'Encrypted data must be 128-1024 bytes, got %d bytes.',
+                        $len,
+                    ))
+                        ->atPath('encryptedData')
+                        ->addViolation();
+                }
             }
         }
+
+        // label is only meaningful for OAEP algorithms
+        if ($this->label === null || in_array($this->algorithm, self::OAEP_ALGORITHMS, true)) {
+            return;
+        }
+        $context->buildViolation('Label is only allowed for OAEP algorithms.')
+            ->atPath('label')
+            ->addViolation();
     }
 }
 ```
@@ -740,17 +855,27 @@ Monolog with a JSON formatter writes to stdout (12-factor app). PHP-FPM error lo
 {
   "require": {
     "php": "^8.5",
-    "symfony/framework-bundle": "^7.4",
-    "symfony/security-bundle": "^7.4",
-    "symfony/validator": "^7.4",
-    "symfony/serializer": "^7.4",
-    "symfony/yaml": "^7.4",
-    "symfony/monolog-bundle": "^3.10",
+    "nelmio/api-doc-bundle": "^4.0",
     "symfony/console": "^7.4",
-    "nelmio/api-doc-bundle": "^4.0"
+    "symfony/framework-bundle": "^7.4",
+    "symfony/monolog-bundle": "^3.10",
+    "symfony/property-access": "^7.4",
+    "symfony/runtime": "^7.4",
+    "symfony/security-bundle": "^7.4",
+    "symfony/serializer": "^7.4",
+    "symfony/validator": "^7.4",
+    "symfony/yaml": "^7.4"
   },
   "require-dev": {
+    "doctrine/coding-standard": "^14.0",
+    "overtrue/phplint": "^9.7",
+    "phpstan/extension-installer": "^1.4",
+    "phpstan/phpstan": "^2.1",
+    "phpstan/phpstan-phpunit": "^2.0",
+    "phpstan/phpstan-symfony": "^2.0",
     "phpunit/phpunit": "^11.0",
+    "squizlabs/php_codesniffer": "^4.0",
+    "symfony/dotenv": "^8.0",
     "symfony/test-pack": "^1.0"
   }
 }
@@ -762,16 +887,33 @@ The `gamringer/php-pkcs11` extension is installed as a system package in the Doc
 
 ## Docker
 
-### PHP-FPM image (`docker/php-fpm/Dockerfile`)
+### Multi-stage `docker/Dockerfile`
 
-- Base: `php:8.5-fpm-alpine`
-- Install `gamringer/php-pkcs11` extension from source
-- Install Composer dependencies
-- Copy application source
-- Run as non-root user
-- Exposes port 9000 (FastCGI)
+Three stages:
 
-### Caddy sidecar (`docker/caddy/Caddyfile`)
+- **`base`**: `php:8.5-fpm-alpine` with `opcache` and the `gamringer/php-pkcs11` PECL extension installed. Composer binary is copied in. Includes a workaround for a musl libc / readline symbol conflict (see note below).
+- **`prod`**: Extends `base` with production Composer dependencies, optimised autoloader, custom PHP-FPM pool config (`docker/php-fpm.conf`), PHP OPcache settings copied from `docker/app.ini`, and a pre-warmed Symfony cache (`APP_DEBUG=0`). Runs as `www-data`.
+- **`dev`**: Extends `prod` with SoftHSM2 and OpenSC installed. An RSA-2048 test key pair is pre-generated in the image so that the PKCS#11 integration tests can run without any host-side HSM. Re-runs Composer install to add dev dependencies and regenerates the autoloader.
+
+> **Alpine / musl libc workaround: `php_cli_get_shell_callbacks` stub**
+>
+> The official `php:8.5-fpm-alpine` image compiles PHP with `--with-readline`, statically linking the readline module into both the CLI and FPM binaries. The readline code references `php_cli_get_shell_callbacks` — a symbol defined only in the CLI SAPI, not in PHP-FPM. On glibc (Debian), this dangling reference is harmless because glibc supports true lazy binding: the symbol is only resolved if the code path that calls it actually executes (which never happens in FPM). On musl libc (Alpine), lazy binding works differently. When the `gamringer/php-pkcs11` extension loads a PKCS#11 module via `dlopen(path, RTLD_NOW)`, musl resolves all pending relocations across every loaded shared object — not just the library being opened. This triggers resolution of the readline reference, which fails with `Symbol not found: php_cli_get_shell_callbacks`.
+>
+> The Dockerfile works around this by compiling a minimal shared library that exports a no-op stub for this symbol and injecting it via `LD_PRELOAD`. The stub is a single C function returning `NULL` (~4 KB).
+>
+> **Alternatives considered:**
+> - **Switch to a Debian-based image** (`php:8.5-fpm-bookworm`): eliminates the problem entirely since glibc handles lazy binding correctly. Trade-off is ~5× larger image size (~450 MB vs ~80 MB).
+> - **Rebuild PHP without `--with-readline`**: would remove the dangling symbol, but requires maintaining a custom PHP build and loses `php -a` interactive shell support in the CLI.
+> - **Patch `php-pkcs11` to use `RTLD_LAZY`**: would defer symbol resolution, but weakens load-time safety guarantees — inappropriate for a cryptographic module loader.
+> - **Switch to FrankenPHP**: its multi-threaded SAPI (ZTS) requires all extensions to be thread-safe. The `gamringer/php-pkcs11` extension has no verified thread-safety guarantees, making this unsuitable for a service that performs private key operations.
+>
+> The current stub approach is the least invasive option that preserves Alpine's small image size while keeping the standard PHP-FPM process model. If image size is not a concern, switching to a Debian-based image is the most maintainable long-term solution.
+
+### PHP configuration (`docker/app.ini`)
+
+OPcache and PHP runtime settings are stored in `docker/app.ini` instead of being generated inline in the Dockerfile. The file is `COPY`'d into the production image and volume-mounted from the host in `compose.yaml`, making it easy to tune settings without rebuilding.
+
+### Caddy sidecar (`docker/Caddyfile`)
 
 - TLS termination
 - `php_fastcgi` directive pointing to the PHP-FPM container on port 9000
@@ -779,10 +921,10 @@ The `gamringer/php-pkcs11` extension is installed as a system package in the Doc
 
 ### `compose.yaml`
 
-Two services:
+The compose file is intended for development. Two services:
 
-- `app`: PHP-FPM container, mounts config file and key files as read-only volumes, sets `PRIVATE_KEY_AGENT_CONFIG`.
-- `caddy`: Caddy container, mounts Caddyfile, depends on `app`.
+- `app`: PHP-FPM container (`dev` stage), mounts config file and `docker/app.ini` as read-only volumes, sets `PRIVATE_KEY_AGENT_CONFIG`.
+- `caddy`: Caddy container, mounts `docker/Caddyfile`, depends on `app`.
 
 ---
 
@@ -887,21 +1029,21 @@ services:
 
 ## Testing Strategy
 
-The test suite is split into three tiers, each with different infrastructure requirements.
+The test suite is split into two directories with different infrastructure requirements.
 
-### Unit tests
+### Unit tests (`tests/Unit/`)
 
-All services, controllers, authenticator, and exception subscriber are tested with PHPUnit using mock implementations of the backend interfaces. No cryptographic operations are performed and no HSM or OpenSSL key material is required. These tests run on any standard PHP environment and are always part of the main CI pipeline.
+All services, controllers, authenticator, exception subscriber, DTOs, config loader, command, and validators are tested with PHPUnit using mocks or pure PHP. No cryptographic operations are performed and no HSM or OpenSSL key material is required. These tests run on any standard PHP environment and are always part of the main CI pipeline.
 
-### OpenSSL integration tests
+Unit test coverage includes: `BackendFactory`, `OpenSslBackendTypeFactory`, `Pkcs11BackendTypeFactory`, `ValidateConfigCommand`, `ConfigLoader`, `DecryptController`, `HealthController`, `SignController`, `DigestInfoBuilder`, `DecryptRequest`, `SignRequest`, `ExceptionSubscriber`, `AccessControlService`, `TokenAuthenticator`, `KeyRegistryBootstrapper`, `KeyRegistry`, `Base64Validator`.
 
-`OpenSslSigningBackend` and `OpenSslDecryptionBackend` are tested against real RSA private key operations. A test key pair is generated at the start of the test run using the OpenSSL CLI (no pre-existing key files needed). These tests verify the full signing and decryption paths through the OpenSSL backend, including correct DigestInfo construction, padding modes, and Base64 encoding of results. They have no external service dependencies and run in the main CI pipeline alongside the unit tests.
+### Integration tests (`tests/Integration/`)
 
-### PKCS#11 integration tests
+`OpenSslSigningBackend`, `OpenSslDecryptionBackend`, `Pkcs11SigningBackend`, and `Pkcs11DecryptionBackend` are tested against real RSA private key operations.
 
-`Pkcs11SigningBackend` and `Pkcs11DecryptionBackend` require a real PKCS#11 token to be present. **These tests cannot be mocked or faked** — because the PKCS#11 backend delegates all cryptographic operations to an external module via native library calls, only a real (or software-emulated) PKCS#11 token can exercise and validate the code.
+**OpenSSL integration tests** have no external dependencies. A test key pair is generated at the start of the test run and these tests run in the main CI pipeline alongside the unit tests.
 
-For CI, **SoftHSM2** is used as a software HSM emulator. SoftHSM2 implements the full PKCS#11 API and behaves identically to physical hardware from the application's perspective. A Docker-based SoftHSM2 environment is provided and runs as a dedicated CI step, separate from the main pipeline.
+**PKCS#11 integration tests** require a real PKCS#11 token. **These tests cannot be mocked or faked** — only a real (or software-emulated) PKCS#11 token can exercise the native library calls. For CI, **SoftHSM2** is used as a software HSM emulator. A Docker-based SoftHSM2 environment is provided and runs as a dedicated CI step, separate from the main pipeline.
 
 The PKCS#11 integration tests cover:
 
@@ -951,17 +1093,17 @@ For network and cloud HSMs, each `C_Sign` or `C_Decrypt` call includes a network
 
 **HSM cryptographic throughput**
 
-HSMs publish rated RSA operation throughputs (operations per second per key size). At 2048-bit RSA, enterprise appliances like Thales Luna Network reach thousands of operations per second. YubiHSM 2 is in the range of tens of operations per second for RSA. If throughput requirements exceed a single HSM's capacity, multiple HSM units can be used by adding multiple backends with the same `backend_key_name` — the agent distributes load round-robin across backends automatically.
+HSMs publish rated RSA operation throughputs (operations per second per key size). At 2048-bit RSA, enterprise appliances like Thales Luna Network reach thousands of operations per second. YubiHSM 2 is in the range of tens of operations per second for RSA. If throughput requirements exceed a single HSM's capacity, multiple HSM units can be used by adding multiple backend group entries pointing to different HSM units — the agent distributes load round-robin across backends automatically.
 
 **Redundancy and availability**
 
 For availability targets above 99.9%, plan for at least two HSM units (or two cloud HSM instances). The agent's round-robin distribution across multiple backends with the same key name provides load distribution. To handle temporary disruptions (e.g., network blips to an HSM appliance), the agent implements **inline session recovery**. If a PKCS#11 operation fails with a session-related error (such as `CKR_SESSION_CLOSED` or `CKR_DEVICE_REMOVED`), the backend catches the error, re-initializes the session, re-authenticates with the PIN, and retries the operation once before failing the request.
 
-If a failure persists and the backend reaches a hard error state, it returns a 500.
+If a failure persists and the backend reaches a hard error state, it returns a 503.
 
 > **Single-worker PKCS#11 session failure is not detectable via the health endpoint alone.**
 >
-> In a multi-worker FPM deployment, health requests route randomly across workers. If only one worker's PKCS#11 session is persistently invalid despite recovery attempts, most health probes will land on healthy workers and return 200 — the degraded worker only surfaces as sporadic 500s on sign/decrypt requests.
+> In a multi-worker FPM deployment, health requests route randomly across workers. If only one worker's PKCS#11 session is persistently invalid despite recovery attempts, most health probes will land on healthy workers and return 200 — the degraded worker only surfaces as sporadic 503s on sign/decrypt requests.
 >
 > **Proposed solution:** Treat the health endpoint as a liveness signal for *boot-time* failures only. For runtime session failures, rely on error-rate monitoring:
 >
@@ -1116,4 +1258,4 @@ The agent requires the following mechanisms. Confirm your HSM supports them befo
 
 ### Configuration note
 
-Set `backend_pkcs11_lib` to the absolute path of the vendor-supplied shared library. Set `backend_pkcs11_slot` to the slot number assigned to your token (use the vendor's CLI tools to list available slots). For cloud HSMs, follow the vendor's documentation to install and configure their PKCS#11 client before running the agent.
+Set `pkcs11_lib` to the absolute path of the vendor-supplied shared library. Set `pkcs11_slot` to the slot number assigned to your token (use the vendor's CLI tools to list available slots). For cloud HSMs, follow the vendor's documentation to install and configure their PKCS#11 client before running the agent.

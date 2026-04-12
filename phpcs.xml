@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<ruleset name="OpenConext Private Key Agent">
+    <description>Doctrine Coding Standard</description>
+
+    <arg name="basepath" value="."/>
+    <arg name="extensions" value="php"/>
+    <arg name="parallel" value="80"/>
+    <arg name="colors"/>
+    <arg value="nps"/>
+
+    <file>src</file>
+    <file>tests</file>
+
+    <rule ref="Doctrine"/>
+
+    <!-- Renaming interfaces and exceptions would break the established naming convention -->
+    <rule ref="SlevomatCodingStandard.Classes.SuperfluousInterfaceNaming">
+        <exclude name="SlevomatCodingStandard.Classes.SuperfluousInterfaceNaming.SuperfluousSuffix"/>
+    </rule>
+    <rule ref="SlevomatCodingStandard.Classes.SuperfluousExceptionNaming">
+        <exclude name="SlevomatCodingStandard.Classes.SuperfluousExceptionNaming.SuperfluousSuffix"/>
+    </rule>
+</ruleset>

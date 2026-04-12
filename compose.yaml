@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: dev
+    volumes:
+      - .:/app
+      - ./config/private-key-agent.yaml:/etc/private-key-agent/config.yaml:ro
+      - ./docker/app.dev.ini:/usr/local/etc/php/conf.d/app.ini:ro
+    environment:
+      APP_ENV: prod
+      APP_SECRET: "${APP_SECRET}"
+      PRIVATE_KEY_AGENT_CONFIG: /etc/private-key-agent/config.yaml
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - app
+    restart: unless-stopped

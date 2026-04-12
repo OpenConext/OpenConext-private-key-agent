@@ -1,0 +1,9 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    handle_all_throwables: true
+    php_errors:
+        log: true
+    serializer:
+        enabled: true
+    validation:
+        enabled: true
