@@ -1,203 +1,541 @@
- # Private-key agent 
- 
-The Private-key agent is a service that exposes a REST API for creating 
-signatures and decrypting data using one or more private keys that it protects.
-The Private-key agent service is intended to be used by other services that need
-to sign and decrypt data, but do not want to handle the protection private keys
-themselves, i.e. for security reasons. The idea is to have the private-key agent 
-running in a different proces and user, possibly on different hosts machines, 
-than the services that use it.
+# OpenConext Private Key Agent
 
-The Private-key agent service can be configured to use software keys, where the
-private key is stored in a file on disk, or hardware keys, where the private key
-is stored in a hardware security module (HSM) using PKCS#11. 
-For the REST API that is exposed to the services, it does not matter whether a 
-software key or a hardware key is used.
+A REST API service that performs RSA signing and decryption operations using protected private keys — without ever exposing the keys to callers. The agent runs in a separate process and user context, optionally on a separate host, from the services that consume it.
 
-The Private-key agent only performs the private key operations. It does
-not process the actual message/data that needs to be signed or decrypted.
-E.g. When signing, it does not create the DigestInfo structure with
-the hash of the message. When decrypting, it only unwraps the encryption key.
-The rest of the signing an decryption processing is to be performed at the client. 
-This choice keeps the private-key agent simple, the size of the REST API calls small, 
-and aligns with the goal of the private-key agent to protect private keys.
+> **Design specifications:** See [DESIGN-SPECIFICATION.md](DESIGN-SPECIFICATION.md) for the full architecture, API contract, configuration reference, and implementation details.  
+> **Initial draft:** The original problem statement and rationale are in [DRAFT-SPEC.md](DRAFT-SPEC.md).
 
-The idea is to use the private-key agent from e.g.:
-https://github.com/simplesamlphp/xml-security/blob/master/src/Backend/SignatureBackend.php
-https://github.com/simplesamlphp/xml-security/blob/master/src/Backend/EncryptionBackend.php
+---
 
-A pool of workers is created to handle the private key operations for one or more keys. 
-Each worker can be configured to use one of two signing backends:
-1. OpenSSL. A software backend. The private keys reside in memory on
-   on the signer, and are loaded from disk when the signer starts.
-2. PKCS#11. A hardware backend. The private keys resides in a hardware
-   security module (HSM). The signer communicates with the HSM(s) using
-   the PKCS#11 (Cryptokey) protocol.
+## Overview
 
-The private-key agent supports multiple clients.
-Clients authenticate to the private-key agent using an OAuth 2.0 bearer token (RFC 6750).
-and the private-key agent uses the error responses defined in RFC 6750. The intention is to
-make the private-key agent usable in a OAuth 2.0 environment at a later date, if needed.
+### Why this exists
 
-Each client can be allowed access to multiple private keys.
-We could implement a more fine-grained access control, e.g. specifying which operations
-a client is allowed to perform on a key, or adding such permissions to a key, but that 
-does not seem to be needed at this time, and would make the private-key agent more complex.
-Typical HSM backends do support some access control, e.g. (dis)allowing decryption and
-signing operations that can be used.
+Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypted session keys. The standard approach loads the private key into the PHP process — meaning the key is accessible to every piece of code in that process. The Private Key Agent moves the key material into an isolated service: clients send only hashes (for signing) or ciphertext (for decryption) and receive back only the result.
 
-The private-key agent only supports private key operations.
-The goal is to support the operations that are required by SimpleSAMLphp
-and OpenConext, keeping the private-key agent API simple, and to define
-the interface such that only the data that needs to be signed or decrypted is exchanges.
-We do not want to send XML documents, certificate etc to the private-key agent.
+### What it does
 
-The following private key operations must be supported, because these are commonly used in SAML (xml-security):
-- RSA: 
-  - RSA PKCS#1 v1.5 signature (CKM_RSA_PKCS)
-  - RSA PKCS#1 v1.5 decryption (CKM_RSA_PKCS) 
-  - RSA PKCS#1 OAEP decryption (CKM_RSA_PKCS_OAEP) 
-More key types (e.g. from the ECC family) and key operations can be added in the future.
-We could only support the RAW RSA operation, the downside is that this may conflict with
-existing HSM policies that forbid the use of RAW RSA operations, and that it requires
-the client to do all the signature preparation (padding) and removing and verifying the
-padding after decryption. 
-The upside is that this would allow the client to implement any signature and decryption 
-scheme that it wants.
-We could use the PKCS#11 interface, but for e.g. CKM_RSA_PKCS, that would require the client
-to build an ASN.1 DigestInfo structure (and we'd still want to check that the client did 
-the padding correctly).
-For signing a sensible middle ground is to support the RSA PKCS#1 v1.5 signature and let the
-client send the hash value and the hashing algorithm that was used and return the signature.
-For decryption using RSA PKCS#1 v1.5 we return the decrypted value, which is the value of the 
-symmetric (decryption) key when using http://www.w3.org/2001/04/xmlenc#rsa-1_5, this is the only 
-information we have. The client can then use this to decrypt the data.
-For decryption using RSA PKCS#1 OAEP we need additional information:
-  - the mask generation function (MGF1) hash algorithm: sha1, sha224, sha256, sha384, sha412
-  - Optionally the OAEP Parameters: label
-OAEP Label is not typically used in the XML Encryption
+| Operation | Client sends | Agent returns |
+|---|---|---|
+| `POST /sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
+| `POST /decrypt/{key_name}` | Base64-encoded ciphertext + algorithm | Base64-encoded plaintext (symmetric key) |
+| `GET /health` | — | Backend health status |
 
-# Configuration
-- agent_name: The name of this agent
+**The private key never leaves the agent.** Only cryptographic inputs and outputs cross the network boundary.
 
-## Pool
-One or more pools of workers can be created. Workers in a pool share the same
-configuration. Their main purpose is to parallelize the private key operations to
-increase throughput.
+### Supported algorithms
 
-- pool_name: The name of the pool
-- pool_type: "openssl" or "pkcs11"
-- pool_size: The number of workers that are created in the pool
-- pool_environment: (optional) environment variables to set for the worker
-  processes in this pool. A pool inherits the environment of the signer.
-  This option allows to set environment variables specific to this pool.
-  Format: list of env1=value1 
-  pkcs11 options:
-  - pool_pkcs11_lib: Path to the PKCS#11 library to use
-  - pool_pkcs11_slot: The PKCS#11 slot number to use
-  - pool_pkcs11_pin: (optional) The user pin to use to authenticate to the 
-  - token in <pool_pkcs11_slot>
+**Signing:**
+- `rsa-pkcs1-v1_5-sha1`
+- `rsa-pkcs1-v1_5-sha256`
+- `rsa-pkcs1-v1_5-sha384`
+- `rsa-pkcs1-v1_5-sha512`
 
-keys: <list of keys>
+**Decryption:**
+- `rsa-pkcs1-v1_5`
+- `rsa-pkcs1-oaep-mgf1-sha1`
+- `rsa-pkcs1-oaep-mgf1-sha224`
+- `rsa-pkcs1-oaep-mgf1-sha256`
+- `rsa-pkcs1-oaep-mgf1-sha384`
+- `rsa-pkcs1-oaep-mgf1-sha512`
 
-### Key
-One or more keys can be loaded in a Pool.
-  - pool_key_type: rsa
-  - pool_key_name: The name of the key, used by clients to refer to this key
-                   The key_name must be unique within the pool
-                   You can use the same key_name in multiple pools, in that case
-                   the signer will evenly distribute the load over the workers in all the pools
-                   where the key is available.
-                   If multiple keys with the same name are used these MUST be that same private key.
-                   The idea is that this allows multiple HSMs to be used for the same key
-                   for performance or redundancy reasons.
-Software options:
-  - pool_key_file: The path to the private key file. For RSA that is a PEM RSA PRIVATE KEY file
-  pkcs11 options:
-  - pool_key_pkcs11_label: The label (CKA_LABEL) of the key to use
-  - pool_key_pkcs11_key_id: The id (CKA_ID) of the key to use
-    One of pool_pkcs11_label or pool_pkcs11_key_id must be set,
-    if both are set, both are used to find the key.
-    Exactly one key must match, if more than one key is found, the key is not loaded. 
+### Key features
 
- ## client
- - client_name: The name of the client
- - client_secret: The bearer token that the client must use to authenticate
- - client_keys: List of pool_key_name with the keys that this client is allowed
-   to use
+- **Two cryptographic backends:** OpenSSL (software PEM keys) and PKCS#11 (hardware security modules, tested with SoftHSM2).
+- **Multiple backends per key:** configure several backend groups for the same logical key to get round-robin load distribution or HSM redundancy.
+- **Static bearer-token authentication** (RFC 6750): each client has a pre-shared token; tokens are compared with `hash_equals()` to prevent timing attacks.
+- **Per-client key authorisation:** each client declares the key names it may use.
+- **Fail-fast configuration:** invalid or missing config prevents the PHP-FPM worker from starting.
+- **Health endpoints:** `/health` and `/health/backend/{name}` for liveness probes and monitoring.
 
+### Technology stack
 
- # REST API
+| Component | Choice |
+|---|---|
+| Language | PHP **8.5** (required — see note below) |
+| Framework | Symfony 7.4 |
+| PKCS#11 bridge | `gamringer/php-pkcs11` |
+| Logging | Monolog → JSON → stdout |
+| HTTP server | PHP-FPM + Caddy (TLS) |
+| Deployment | Docker Compose |
 
-Responses may include additional fields, but the fields listed below are mandatory.
-A client MUST check ignore any additional fields in the response.
+> **PHP 8.5 is a hard requirement.** PHP 8.5 adds the `digest_algo` parameter to `openssl_private_decrypt()`, which is the only way to select non-SHA-1 OAEP hash algorithms. Earlier PHP versions cannot implement `rsa-pkcs1-oaep-mgf1-sha256/384/512` via OpenSSL.
 
- - POST /sign/{key_name}
-   Authorization: Bearer <token>
-   Encoding: application/json
- 
-   {
-     "algorithm": "rsa-pkcs1-v1_5-sha256", "rsa-pkcs1-v1_5-sha1", etc
-     "hash": "<Base64 string with the hash to put in the DigestInfo structure (data to sign)>"
-   }
-   Response (OK 200): Signature created successfully
-Encoding: application/json
+---
+
+## Developer setup
+
+### Prerequisites
+
+- Docker with Compose v2
+- `openssl` CLI (for key generation)
+- `bash` (for helper scripts)
+
+### 1 — Clone and start the stack
+
+```bash
+git clone <repo-url> openconext-private-key-agent
+cd openconext-private-key-agent
+docker compose up -d
+```
+
+This builds the `dev` Docker image (PHP-FPM + SoftHSM2) and starts the Caddy TLS proxy.
+
+### 2 — Provision the development environment
+
+Run the setup script **from the project root** (not inside the container):
+
+```bash
+./tools/setup-dev.sh
+```
+
+The script:
+1. Generates RSA-2048 PEM keys in `config/keys/` for the OpenSSL backend.
+2. Detects the SoftHSM2 slot from the running container.
+3. Writes a fresh `config/private-key-agent.yaml` with a randomly generated bearer token.
+
+The setup is **idempotent** — running it again is safe. Use `--force` to regenerate keys and token:
+
+```bash
+./tools/setup-dev.sh --force
+```
+
+### 3 — Install PHP dependencies
+
+```bash
+docker compose exec app composer install
+```
+
+### 4 — Verify the setup
+
+Smoke-test all endpoints (reads the bearer token from the config file automatically):
+
+```bash
+./tools/test-endpoints.sh
+```
+
+Verbose mode shows every response body:
+
+```bash
+./tools/test-endpoints.sh -v
+```
+
+Run a single group:
+
+```bash
+./tools/test-endpoints.sh sign
+./tools/test-endpoints.sh decrypt
+./tools/test-endpoints.sh health
+./tools/test-endpoints.sh auth
+```
+
+### Development keys and SoftHSM
+
+After running `setup-dev.sh` the project has three logical keys, each backed by a different backend. This deliberately exercises all supported backend types in a single dev environment.
+
+#### Key inventory
+
+| Logical key name | Backend | Type | Allowed operations |
+|---|---|---|---|
+| `dev-signing-key` | OpenSSL (`openssl-signing`) | Software PEM | signing |
+| `dev-decryption-key` | OpenSSL (`openssl-decryption`) | Software PEM | decryption |
+| `hsm-key` | SoftHSM (`softhsm`) | PKCS#11 (emulated HSM) | signing + decryption |
+
+#### OpenSSL (software) keys
+
+`setup-dev.sh` generates two unencrypted RSA-2048 PEM key pairs under `config/keys/`:
+
+```
+config/keys/
+├── dev-signing.pem          ← private key (loaded by the agent)
+├── dev-signing.pub.pem      ← public key (for clients: verify signatures)
+├── dev-decryption.pem       ← private key (loaded by the agent)
+└── dev-decryption.pub.pem   ← public key (for clients: encrypt session keys)
+```
+
+The private key files are **unencrypted and ephemeral** — suitable only for local development. They are listed in `.gitignore` and must never be committed.
+
+> **Production equivalent:** replace the PEM file with a properly protected key (file permissions restricted to the service account, or a key stored in a secrets manager and written to a tmpfs mount at deploy time). The agent config just needs `key_path` updated to point to the production key file.
+
+#### SoftHSM (emulated hardware key)
+
+[SoftHSM2](https://github.com/opendnssec/SoftHSMv2) is a software implementation of a PKCS#11 token, used here so that HSM code paths can be exercised without physical hardware. It is installed and initialised inside the `dev` Docker image during the build, so no host-side setup is required.
+
+**Token details (baked into the dev image):**
+
+| Property | Value |
+|---|---|
+| Token label | `test-token` |
+| Slot index | `0` |
+| Key label (`CKA_LABEL`) | `test-signing-key` |
+| Key ID (`CKA_ID`) | `01` |
+| User PIN | `1234` |
+| SO PIN | `5678` |
+| Key type | RSA-2048 |
+
+The public key is exported to `config/keys/hsm-signing.pub.pem` by `setup-dev.sh` after the container starts. Clients use this file to encrypt data or verify signatures produced by `hsm-key`.
+
+Inspect the token directly from inside the container:
+
+```bash
+docker compose exec app pkcs11-tool \
+  --module /usr/lib/softhsm/libsofthsm2.so \
+  --slot-index 0 --pin 1234 --list-objects
+```
+
+> **Production equivalent:** replace `softhsm` with a real HSM backend. Update `pkcs11_lib` to the vendor's `.so`, set `pkcs11_slot`, `pkcs11_pin`, and either `pkcs11_key_label` or `pkcs11_key_id` to match the key provisioned on the HSM. The REST API and agent behaviour are identical — only the backend config changes.
+
+#### Bearer token
+
+`setup-dev.sh` generates a random 256-bit hex token per run and writes it into `config/private-key-agent.yaml`. It is printed to the terminal on completion.
+
+> **Production equivalent:** generate a cryptographically random token of at least 256 bits and inject it into the config file via your secrets management solution (Docker secrets, Kubernetes secret, Vault, etc.). Each client should have its own token. **Never reuse the development token in production.**
+
+#### Summary: dev → production mapping
+
+| Dev resource | Production replacement |
+|---|---|
+| Unencrypted PEM key in `config/keys/` | PEM key with restricted filesystem permissions, or secrets-manager-mounted key |
+| SoftHSM2 in the Docker image | Vendor HSM (e.g. Thales, Utimaco, YubiHSM); update `pkcs11_lib`, slot, PIN, key label/ID |
+| Hardcoded token in `config/private-key-agent.yaml` | Randomly generated token injected at deploy time via secrets management |
+| Single `dev-client` with access to all keys | One client entry per consuming service, with `allowed_keys` scoped to only the keys that service needs |
+
+---
+
+## Development
+
+All `composer` and PHP commands run **inside the `app` container**. Start the stack first if it is not already running:
+
+```bash
+docker compose up -d
+```
+
+### Composer scripts
+
+| Script | Command | What it runs |
+|--------|---------|--------------|
+| `lint` | `composer lint` | phplint → PHPStan → PHP_CodeSniffer |
+| `test` | `composer test` | PHPUnit (Unit + Integration suites) |
+| `check` | `composer check` | phplint + PHPStan + `composer audit` + PHPUnit |
+| `phpstan` | `composer phpstan` | Static analysis only |
+| `phpcs` | `composer phpcs` | Code style check only |
+| `phpcbf` | `composer phpcbf` | Auto-fix code style violations |
+| `phplint` | `composer phplint` | PHP syntax check on `src/` and `tests/` |
+
+### Static analysis — PHPStan
+
+PHPStan runs at **level 8** and covers `src/` and `tests/`:
+
+```bash
+docker compose exec app composer phpstan
+```
+
+The configuration is in `phpstan.neon`. A `phpstan-baseline.neon` file tracks any accepted false positives (currently just PKCS#11 extension classes that are unavailable on the host). To regenerate the baseline after deliberate changes:
+
+```bash
+docker compose exec app vendor/bin/phpstan analyse --generate-baseline
+```
+
+> PHPStan runs inside the container because the `Pkcs11` PHP extension is only available there.
+
+### Code style — PHP_CodeSniffer (Doctrine standard)
+
+The project follows the [Doctrine Coding Standard](https://github.com/doctrine/coding-standard). Configuration is in `phpcs.xml`.
+
+Check for violations:
+
+```bash
+docker compose exec app composer phpcs
+```
+
+Auto-fix what can be fixed automatically:
+
+```bash
+docker compose exec app composer phpcbf
+```
+
+### Unit and integration tests — PHPUnit
+
+```bash
+# Run all tests (Unit + Integration)
+docker compose exec app composer test
+
+# Run the Unit suite only
+docker compose exec app vendor/bin/phpunit --testsuite Unit
+
+# Run the Integration suite only
+docker compose exec app vendor/bin/phpunit --testsuite Integration
+
+# Run a single test file
+docker compose exec app vendor/bin/phpunit tests/Unit/Controller/SignControllerTest.php
+
+# Run a single test method
+docker compose exec app vendor/bin/phpunit --filter testSignReturnsSignature
+
+# Show test progress (dots → verbose)
+docker compose exec app vendor/bin/phpunit --testdox
+```
+
+**Test suites:**
+
+- `tests/Unit/` — fast, isolated tests with mocked dependencies. No network or filesystem access.
+- `tests/Integration/Backend/` — backend tests that use real OpenSSL keys or SoftHSM2. These require the Docker container (keys and PKCS#11 library must be present).
+
+PHPUnit configuration is in `phpunit.xml.dist`. The `APP_ENV=test` environment is set automatically.
+
+### Full CI check
+
+Runs everything the CI pipeline checks, in order:
+
+```bash
+docker compose exec app composer check
+```
+
+This executes: `phplint` → `phpstan` → `composer audit` → `phpunit`.
+
+### Smoke tests — test-endpoints.sh
+
+End-to-end HTTP tests against the running stack (run from the host, not inside the container):
+
+```bash
+# Run all test groups
+./tools/test-endpoints.sh
+
+# Verbose — print every response body
+./tools/test-endpoints.sh -v
+
+# Run a single group
+./tools/test-endpoints.sh health
+./tools/test-endpoints.sh auth
+./tools/test-endpoints.sh sign
+./tools/test-endpoints.sh decrypt
+
+# Verbose + single group
+./tools/test-endpoints.sh -v sign
+
+# Target a different host
+BASE_URL=https://agent.example.com ./tools/test-endpoints.sh
+```
+
+The script reads the bearer token from `config/private-key-agent.yaml` automatically. Docker Compose must be running.
+
+### Performance benchmarks — perf-test.sh
+
+Load-tests the sign and decrypt endpoints using [`hey`](https://github.com/rakyll/hey):
+
+```bash
+# Install hey (macOS)
+brew install hey
+
+# Run all benchmarks (default: 10 concurrent workers, 10s per endpoint)
+./tools/perf-test.sh
+
+# Tune concurrency and duration
+./tools/perf-test.sh -c 20 -d 30s
+
+# Benchmark a single group
+./tools/perf-test.sh sign
+./tools/perf-test.sh decrypt
+
+# Combined options
+./tools/perf-test.sh -c 10 -d 15s sign
+
+# Target a different host
+BASE_URL=https://agent.example.com ./tools/perf-test.sh
+```
+
+The script runs a sanity check (HTTP 200) before each benchmark and skips the endpoint if the check fails. It tests both the OpenSSL backend keys and the SoftHSM backend key.
+
+### Validate config — console command
+
+Parse and validate a config file without starting the server:
+
+```bash
+docker compose exec app bin/console app:validate-config /path/to/config.yaml
+```
+
+Exit code `0` means the config is structurally valid. Errors are printed to stderr. This does **not** open key files or HSM sessions — it validates the YAML structure and cross-references only.
+
+### Dependency security audit
+
+```bash
+docker compose exec app composer audit
+```
+
+Reports known vulnerabilities in installed packages via the Packagist Security Advisories database.
+
+---
+
+## Configuration
+
+The agent is configured from a single YAML file. The path is set via the `PRIVATE_KEY_AGENT_CONFIG` environment variable (default in Docker Compose: `/etc/private-key-agent/config.yaml`).
+
+### Minimal example
+
+```yaml
+agent_name: my-private-key-agent
+
+backend_groups:
+  - name: software-backend
+    type: openssl
+    key_path: /etc/private-key-agent/keys/signing.pem
+
+keys:
+  - name: my-signing-key
+    signing_backends:
+      - software-backend
+
+clients:
+  - name: simplesamlphp
+    token: "your-secret-bearer-token"
+    allowed_keys:
+      - my-signing-key
+```
+
+### Full example with PKCS#11 and multiple backends
+
+```yaml
+agent_name: my-private-key-agent
+
+backend_groups:
+  - name: hsm-signing
+    type: pkcs11
+    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
+    pkcs11_slot: 0
+    pkcs11_pin: "1234"
+    pkcs11_key_label: signing-key
+    environment:
+      SOFTHSM2_CONF: /etc/softhsm2.conf
+
+  - name: hsm-decryption
+    type: pkcs11
+    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
+    pkcs11_slot: 1
+    pkcs11_pin: "1234"
+    pkcs11_key_id: "02"
+
+  - name: openssl-fallback
+    type: openssl
+    key_path: /etc/private-key-agent/keys/decryption.pem
+
+keys:
+  - name: saml-key
+    signing_backends:
+      - hsm-signing
+    decryption_backends:
+      - hsm-decryption
+      - openssl-fallback  # round-robin across both
+
+clients:
+  - name: simplesamlphp-idp
+    token: "bearer-token-here"
+    allowed_keys:
+      - saml-key
+```
+
+For the full configuration reference (all fields, validation rules, secrets handling) see [DESIGN-SPECIFICATION.md — Configuration](DESIGN-SPECIFICATION.md#configuration).
+
+### Validate a config file without starting the server
+
+```bash
+docker compose exec app bin/console app:validate-config /path/to/config.yaml
+```
+
+---
+
+## SimpleSAML integration
+
+The agent is designed to be used with the [`simplesamlphp/xml-security`](https://github.com/simplesamlphp/xml-security) library via two adapter classes — one implementing `SignatureBackend`, one implementing `EncryptionBackend`.
+
+### How signing works (IdP)
+
+When SimpleSAMLphp signs a SAML Response:
+
+1. `xml-security` C14N-transforms the element, computes a SHA digest of the result, builds `ds:SignedInfo`, and calls `SignatureBackend::sign($key, $plaintext)` with the canonicalized `ds:SignedInfo` bytes.
+2. The adapter **hashes the plaintext locally** (e.g. SHA-256) and calls `POST /sign/{key_name}` with the Base64-encoded hash and algorithm.
+3. The agent constructs the DigestInfo ASN.1 structure internally and returns the RSA signature.
+4. The adapter returns the raw signature bytes; `xml-security` embeds them in `ds:SignatureValue`.
+
+### How decryption works (SP)
+
+When SimpleSAMLphp decrypts an encrypted SAML Assertion:
+
+1. `xml-security` extracts the RSA-encrypted session key from `xenc:CipherValue` and calls `EncryptionBackend::decrypt($key, $ciphertext)` with those bytes.
+2. The adapter calls `POST /decrypt/{key_name}` with the Base64-encoded ciphertext and algorithm.
+3. The agent RSA-decrypts the session key and returns it.
+4. `xml-security` uses the session key to AES-decrypt the assertion content.
+
+The symmetric session key and the assertion content are **never sent to the agent**.
+
+### Adapter skeleton (PHP)
+
+```php
+use SimpleSAML\XMLSecurity\Backend\SignatureBackend;
+
+class PrivateKeyAgentSignatureBackend implements SignatureBackend
 {
-    "signature": "<Base64 string with the signature>"
+    public function __construct(
+        private readonly string $baseUrl,
+        private readonly string $bearerToken,
+        private readonly string $keyName,
+    ) {}
+
+    public function sign(PrivateKey $key, string $plaintext): string
+    {
+        // Determine algorithm from $key (e.g. RSA + SHA-256 → rsa-pkcs1-v1_5-sha256)
+        $algorithm = 'rsa-pkcs1-v1_5-sha256';
+        $hash = base64_encode(hash('sha256', $plaintext, true));
+
+        $response = $this->post("/sign/{$this->keyName}", [
+            'algorithm' => $algorithm,
+            'hash'      => $hash,
+        ]);
+
+        return base64_decode($response['signature']);
+    }
+
+    // … HTTP helper, EncryptionBackend adapter follows the same pattern
 }
-   Response (wrong request 400): Missing or invalid parameters
-   - error: Invalid request
-   Response (authentication error 401): Invalid or missing bearer token
-   - error: Authentication error
-   Response (Access Denied 403): Unknown client or key, or client not allowed to use the key
-   - error: Access Denied
-   Response (Internal Server Error 500): Error creating the signature because of a server issue
-   - error: Internal Server Error
-   - 
- - POST /decrypt/{key_name}
-   Authorization: Bearer <token>
-   Encoding: application/json
-   {
-     "algorithm": "rsa-pkcs1-v1_5" or "rsa-pkcs1-oaep-mgf1-sha1", "rsa-pkcs1-oaep-mgf1-sha256",
-     "encrypted_data": "<Base64 string with the encrypted data>"
-   }
-   Response (OK 200): Decryption successful
-   Encoding: application/json
-   {
-       "decrypted_data": "<Base64 string with the decrypted data>"
-   }
+```
 
-The POST returns rfc6750 3.1. Error Codes
-- invalid_request (HTTP 400): A parameter is missing or invalid
-- invalid_token (HTTP 401): The bearer token is missing or invalid
- E.g.:
-     HTTP/1.1 401 Unauthorized
-     WWW-Authenticate: Bearer realm="<agent_name>",
-                       error="invalid_token",
-                       error_description="The access token expired"
+For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.md — SimpleSAML integration](DESIGN-SPECIFICATION.md#simplesam-integration).
 
-Other error codes:
-- "access_denied" (HTTP 403): The client is not allowed to use the requested key, or the key does not exist
-- "server_error" (HTTP 500): An error occurred on the server, e.g. because of a problem
-  with a signing backend.
-The error MAY include additional information about the error in the "message" field.
-Same status code MUST be set in both the HTTP response and the JSON response
+---
 
-Encoding: application/json
-{
-   "status": 403,
-   "error": "Access Denied",
-   "message": "Optional message with more information for the client"
-}
+## API reference
 
- - GET /health
-   Response (OK 200): The signer is healthy
-   - status: OK
-   Response (Internal Server Error 500): The signer is not healthy
-   - status: Internal Server Error
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/sign/{key_name}` | Bearer token | Sign a hash |
+| `POST` | `/decrypt/{key_name}` | Bearer token | Decrypt ciphertext |
+| `GET` | `/health` | None | Overall health |
+| `GET` | `/health/backend/{name}` | None | Per-backend health |
 
-- GET /health/pool/{pool_name}
-    Response (OK 200): The pool is healthy
-    - status: OK
-    Response (Internal Server Error 500): The pool is not healthy
-    - status: Internal Server Error
+Error responses follow RFC 6750 and always include `status`, `error`, and an optional `message` field. On `401` a `WWW-Authenticate` header is also returned.
+
+The full OpenAPI spec is served at `/api/doc` when the application is running.
+
+---
+
+## Project structure
+
+```
+src/
+├── Backend/        # OpenSSL and PKCS#11 backend implementations
+├── Command/        # CLI commands (validate-config)
+├── Config/         # Config loading and validation
+├── Controller/     # Sign, Decrypt, Health endpoints
+├── Crypto/         # DigestInfo ASN.1 builder
+├── Dto/            # Request DTOs
+├── EventSubscriber/# Exception → JSON error response mapping
+├── Exception/      # Domain exceptions
+├── Security/       # Bearer-token authenticator and access control
+├── Service/        # KeyRegistry (runtime key → backend mapping)
+└── Validator/      # Custom Symfony validators (Base64)
+```
+
+---
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

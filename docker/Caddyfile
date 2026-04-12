@@ -1,0 +1,26 @@
+localhost {
+    # TLS configuration — use internal CA for dev, provide certs for production
+    tls internal
+
+    # Reverse proxy to PHP-FPM (Symfony front-controller: all requests → index.php)
+    # Using explicit fastcgi transport avoids Caddy needing /app/public on its own filesystem
+    reverse_proxy app:9000 {
+        transport fastcgi {
+            root /app/public
+            split .php
+            env SCRIPT_FILENAME /app/public/index.php
+        }
+    }
+
+    # Security headers
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+
+    log {
+        output stdout
+        format json
+    }
+}

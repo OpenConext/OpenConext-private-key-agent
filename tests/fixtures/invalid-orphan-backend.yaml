@@ -1,0 +1,20 @@
+agent_name: test-agent
+
+backend_groups:
+  - name: used-backend
+    type: openssl
+    key_path: /tmp/test-key.pem
+  - name: orphan-backend
+    type: openssl
+    key_path: /tmp/other-key.pem
+
+keys:
+  - name: my-key
+    signing_backends:
+      - used-backend
+
+clients:
+  - name: test-client
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys:
+      - my-key

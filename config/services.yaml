@@ -1,0 +1,38 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+
+    # Config provider as singleton
+    App\Config\ConfigProvider:
+        lazy: true
+        arguments:
+            $configPath: '%env(string:PRIVATE_KEY_AGENT_CONFIG)%'
+
+    # Expose AgentConfig from the provider
+    App\Config\AgentConfig:
+        factory: ['@App\Config\ConfigProvider', 'getConfig']
+
+    # Create and populate KeyRegistry using KeyRegistryBootstrapper factory
+    App\Service\KeyRegistry:
+        factory: ['@App\Service\KeyRegistryBootstrapper', 'createRegistry']
+        arguments:
+            - '@App\Config\AgentConfig'
+
+    # Wiring for services that need AgentConfig
+    App\Security\TokenAuthenticator:
+        arguments:
+            $config: '@App\Config\AgentConfig'
+
+    App\EventSubscriber\ExceptionSubscriber:
+        arguments:
+            $config: '@App\Config\AgentConfig'
+
+    App\Security\AuthenticatorInterface: '@App\Security\TokenAuthenticator'
+    App\Security\AccessControlInterface: '@App\Security\AccessControlService'
+    App\Service\KeyRegistryInterface: '@App\Service\KeyRegistry'

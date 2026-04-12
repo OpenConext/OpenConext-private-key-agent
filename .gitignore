@@ -1,2 +1,14 @@
 # Git worktrees
 .worktrees/
+
+# Dev private keys and agent config (contain secrets)
+/config/keys/
+/config/private-key-agent.yaml
+/vendor/
+/var/
+/.env.local
+/.env.*.local
+/config/reference.php
+/.phplint.cache
+/.phpunit.result.cache
+/.php_cs.cache

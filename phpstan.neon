@@ -1,0 +1,20 @@
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 8
+    reportUnmatchedIgnoredErrors: false
+
+    paths:
+        - src
+        - tests
+
+    symfony:
+        consoleApplicationLoader: tests/phpstan-console-app.php
+
+    ignoreErrors:
+        # Pkcs11 extension classes are not available on the host, only inside Docker
+        - '#^Class \\\\?Pkcs11\\\\#'
+        - '#^Constant \\\\?Pkcs11\\\\#'
+        # PHPStan false positive: isSessionError() return type cannot be statically determined
+        - identifier: deadCode.unreachable

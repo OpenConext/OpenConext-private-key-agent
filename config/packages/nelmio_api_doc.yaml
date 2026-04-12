@@ -1,0 +1,76 @@
+nelmio_api_doc:
+    documentation:
+        info:
+            title: Private Key Agent API
+            description: REST API for RSA signing and decryption operations
+            version: 1.0.0
+        components:
+            securitySchemes:
+                Bearer:
+                    type: http
+                    scheme: bearer
+            schemas:
+                SignRequest:
+                    type: object
+                    required: [algorithm, hash]
+                    properties:
+                        algorithm:
+                            type: string
+                            enum:
+                                - rsa-pkcs1-v1_5-sha1
+                                - rsa-pkcs1-v1_5-sha256
+                                - rsa-pkcs1-v1_5-sha384
+                                - rsa-pkcs1-v1_5-sha512
+                        hash:
+                            type: string
+                            format: byte
+                            description: Base64-encoded hash bytes
+                SignResponse:
+                    type: object
+                    properties:
+                        signature:
+                            type: string
+                            format: byte
+                            description: Base64-encoded signature
+                DecryptRequest:
+                    type: object
+                    required: [algorithm, encrypted_data]
+                    properties:
+                        algorithm:
+                            type: string
+                            enum:
+                                - rsa-pkcs1-v1_5
+                                - rsa-pkcs1-oaep-mgf1-sha1
+                                - rsa-pkcs1-oaep-mgf1-sha224
+                                - rsa-pkcs1-oaep-mgf1-sha256
+                                - rsa-pkcs1-oaep-mgf1-sha384
+                                - rsa-pkcs1-oaep-mgf1-sha512
+                        encrypted_data:
+                            type: string
+                            format: byte
+                            description: Base64-encoded ciphertext (128-1024 bytes decoded)
+                        label:
+                            type: string
+                            format: byte
+                            description: Optional base64-encoded OAEP label (OAEP only)
+                DecryptResponse:
+                    type: object
+                    properties:
+                        decrypted_data:
+                            type: string
+                            format: byte
+                            description: Base64-encoded decrypted data
+                ErrorResponse:
+                    type: object
+                    properties:
+                        status:
+                            type: integer
+                        error:
+                            type: string
+                        message:
+                            type: string
+        security:
+            - Bearer: []
+    areas:
+        path_patterns:
+            - ^/(?!_)
