@@ -3,12 +3,19 @@ services:
         autowire: true
         autoconfigure: true
 
+    Psr\Log\LoggerInterface: '@monolog.logger'
+
     App\:
         resource: '../src/'
         exclude:
             - '../src/Kernel.php'
 
+    App\Logging\ProcessIdProcessor:
+        tags:
+            - { name: monolog.processor }
+
     # Config provider as singleton
+
     App\Config\ConfigProvider:
         lazy: true
         arguments:

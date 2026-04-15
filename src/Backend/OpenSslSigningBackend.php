@@ -9,6 +9,7 @@ use App\Crypto\DigestInfoBuilder;
 use App\Exception\BackendException;
 use OpenSSLAsymmetricKey;
 
+use Psr\Log\LoggerInterface;
 use function file_get_contents;
 use function hash;
 use function openssl_error_string;
@@ -26,6 +27,7 @@ final class OpenSslSigningBackend implements SigningBackendInterface
 
     public function __construct(
         private readonly BackendGroupConfig $config,
+        private readonly LoggerInterface $logger,
     ) {
         $keyContent = @file_get_contents($config->keyPath ?? '');
         if ($keyContent === false) {

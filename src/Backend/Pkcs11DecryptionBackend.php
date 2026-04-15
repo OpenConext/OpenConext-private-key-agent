@@ -12,6 +12,7 @@ use Pkcs11\Key;
 use Pkcs11\Mechanism;
 use Pkcs11\RsaOaepParams;
 use Pkcs11\Session;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 use function assert;
@@ -79,7 +80,10 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
         'rsa-pkcs1-oaep-mgf1-sha512' => CKG_MGF1_SHA512,
     ];
 
-    public function __construct(private readonly BackendGroupConfig $config)
+    public function __construct(
+        private readonly BackendGroupConfig $config,
+        private readonly LoggerInterface $logger,
+    )
     {
         if (! extension_loaded('pkcs11')) {
             throw new BackendException('pkcs11 PHP extension is not loaded');
@@ -142,15 +146,27 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
         try {
             $mechanism = $this->buildMechanism($mechanismType, $algorithm, $label);
 
-            return $privateKey->decrypt($mechanism, $ciphertext);
+            $res= $privateKey->decrypt($mechanism, $ciphertext);
+
+            $this->logger->info('DECRYPT: Decrypted ciphertext {ciphertext} with algorithm {algorithm} using private key {handle} in session {session}',
+                ['ciphertext' => base64_encode($ciphertext), 'algorithm' => $algorithm, 'handle' => $privateKey, 'session' => $this->session]);
+
+            return $res;
         } catch (Exception $e) {
             if ($this->isSessionError($e)) {
+                $this->logger->info('Session error {error} for private key {handle}, re-finding', ['error' => $e->getMessage(), 'handle' => $privateKey]);;
+
                 $this->session    = null;
                 $this->privateKey = null;
                 $privateKey       = $this->ensurePrivateKey();
                 $mechanism        = $this->buildMechanism($mechanismType, $algorithm, $label);
 
-                return $privateKey->decrypt($mechanism, $ciphertext);
+                $res = $privateKey->decrypt($mechanism, $ciphertext);
+
+                $this->logger->info('DECRYPT: Decrypted ciphertext {ciphertext} with algorithm {algorithm} using private key {handle} in session {session}',
+                    ['ciphertext' => base64_encode($ciphertext), 'algorithm' => $algorithm, 'handle' => $privateKey, 'session' => $this->session]);
+
+                return $res;
             }
 
             throw new BackendException(sprintf(
@@ -166,6 +182,9 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
         $session = $this->ensureSession();
         if ($this->privateKey === null) {
             $this->privateKey = $this->findPrivateKey($session);
+            $this->logger->info('NEW OBJECT: Found private decryption key {handle} for use in session {session}', ['handle' => $this->privateKey, 'session' => $session]);
+        } else {
+            $this->logger->info('REUSE OBJECT: Reusing private decryption key {handle} in session {session}', ['handle' => $this->privateKey, 'session' => $session]);
         }
 
         return $this->privateKey;
@@ -187,6 +206,7 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
     private function ensureSession(): Session
     {
         if ($this->session !== null) {
+            $this->logger->info('REUSE SESSION: Reusing session {session}', ['session' => $this->session]);
             return $this->session;
         }
 
@@ -199,7 +219,7 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
         }
 
         try {
-            $module = Pkcs11ModuleCache::get($this->config->pkcs11Lib);
+            $module = Pkcs11ModuleCache::get($this->config->pkcs11Lib, $this->logger);
 
             $slotList = $module->getSlotList();
             $slotId   = $slotList[$this->config->pkcs11Slot]
@@ -217,6 +237,8 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
                     }
                 }
             }
+
+            $this->logger->info('NEW SESSION: Opened PKCS#11 session {session} for slot {slot}', ['session' => $session, 'slot' => $slotId]);
 
             $this->session    = $session;
             $this->privateKey = $this->findPrivateKey($session);
