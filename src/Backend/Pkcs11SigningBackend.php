@@ -11,6 +11,7 @@ use Pkcs11\Exception;
 use Pkcs11\Key;
 use Pkcs11\Mechanism;
 use Pkcs11\Session;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 use function count;
@@ -43,7 +44,10 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
 
     private string|null $publicKeyFingerprint = null;
 
-    public function __construct(private readonly BackendGroupConfig $config)
+    public function __construct(
+        private readonly BackendGroupConfig $config,
+        private readonly LoggerInterface $logger,
+    )
     {
         if (! extension_loaded('pkcs11')) {
             throw new BackendException('pkcs11 PHP extension is not loaded');
@@ -84,15 +88,25 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
         try {
             $mechanism = new Mechanism(CKM_RSA_PKCS);
 
-            return $privateKey->sign($mechanism, $digestInfo);
+            $res=$privateKey->sign($mechanism, $digestInfo);
+            $this->logger->info('SIGN: Signed hash {hash} with algorithm {algorithm} using private key {handle} in session {session}',
+                ['hash' => base64_encode($hash), 'algorithm' => $algorithm, 'handle' => $privateKey, 'session' => $this->session]);
+            return $res;
         } catch (Exception $e) {
             if ($this->isSessionError($e)) {
+                $this->logger->info('Session error {error} for private key {handle}, re-finding', ['error' => $e->getMessage(), 'handle' => $privateKey]);;
+
                 $this->session    = null;
                 $this->privateKey = null;
                 $privateKey       = $this->ensurePrivateKey();
                 $mechanism        = new Mechanism(CKM_RSA_PKCS);
 
-                return $privateKey->sign($mechanism, $digestInfo);
+                $res = $privateKey->sign($mechanism, $digestInfo);
+
+                $this->logger->info('SIGN: Signed hash {hash} with algorithm {algorithm} using private key {handle} in session {session}',
+                    ['hash' => base64_encode($hash), 'algorithm' => $algorithm, 'handle' => $privateKey, 'session' => $this->session]);
+
+                return $res;
             }
 
             throw new BackendException(sprintf(
@@ -105,9 +119,14 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
 
     private function ensurePrivateKey(): Key
     {
+        $this->logger->info('Ensuring private key for backend "{backend}"', ['backend' => $this->config->name]);
         $session = $this->ensureSession();
         if ($this->privateKey === null) {
+            $this->logger->info('Private key not found for backend "{backend}", re-finding', ['backend' => $this->config->name]);
             $this->privateKey = $this->findPrivateKey($session);
+            $this->logger->info('NEW OBJECT: Found private signing key {handle} for use in session {session}"', ['handle' => $this->privateKey, 'session' => $session]);
+        } else {
+            $this->logger->info('REUSE OBJECT: Reusing private signing key {handle} in session {session}', ['handle' => $this->privateKey, 'session' => $session]);
         }
 
         return $this->privateKey;
@@ -115,7 +134,9 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
 
     private function ensureSession(): Session
     {
+        $this->logger->info('Ensuring PKCS#11 session for backend "{backend}"', ['backend' => $this->config->name]);
         if ($this->session !== null) {
+            $this->logger->info('REUSE SESSION: Reusing existing PKCS#11 session {session} for backend "{backend}"', ['backend' => $this->config->name, 'session'=>$this->session]);
             return $this->session;
         }
 
@@ -128,15 +149,22 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
         }
 
         try {
-            $module = Pkcs11ModuleCache::get($this->config->pkcs11Lib);
+            $module = Pkcs11ModuleCache::get($this->config->pkcs11Lib, $this->logger);
 
+            $this->logger->info('Creating new PKCS#11 session for backend "{backend}"', ['backend' => $this->config->name]);
+
+            $this->logger->info('Calling getSlotList');
             $slotList = $module->getSlotList();
             $slotId   = $slotList[$this->config->pkcs11Slot]
                 ?? throw new BackendException(sprintf('Slot %d not found', $this->config->pkcs11Slot));
 
+            $this->logger->info('Creating new PKCS#11 session for backend "{backend}", slot: {slot}', ['backend' => $this->config->name, 'slot' => $slotId]);
+
             $session = $module->openSession($slotId, CKF_SERIAL_SESSION);
+            $this->logger->info('NEW SESSION: Got new session {session}', ['session' => $session]);;
             if ($this->config->pkcs11Pin !== null) {
                 try {
+                    $this->logger->info('Logging in to PKCS#11 session {session}', ['session' => $session]);
                     $session->login(CKU_USER, $this->config->pkcs11Pin);
                 } catch (Exception $e) {
                     // CKR_USER_ALREADY_LOGGED_IN: another session on this token is already authenticated;
@@ -144,11 +172,19 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
                     if ($e->getCode() !== 0x100) {
                         throw $e;
                     }
+                    $this->logger->info('Session {session} already logged in, continuing', ['session' => $session]);
                 }
             }
 
             $this->session    = $session;
+
+            $bNeededNewKey = (null === $this->privateKey);
             $this->privateKey = $this->findPrivateKey($session);
+            if ($bNeededNewKey) {
+                $this->logger->info('NEW OBJECT: Found private signing key {handle} for use in session {session}"', ['handle' => $this->privateKey, 'session' => $session]);
+            } else {
+                $this->logger->info('REUSE OBJECT: Reusing private signing key {handle} in session {session}', ['handle' => $this->privateKey, 'session' => $session]);
+            }
 
             return $session;
         } catch (BackendException $e) {
@@ -164,6 +200,7 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
 
     private function findPrivateKey(Session $session): Key
     {
+        $this->logger->info('Finding private key for PKCS#11 session"', ['session' => $session]);
         $template = [
             CKA_CLASS => CKO_PRIVATE_KEY,
             CKA_KEY_TYPE => CKK_RSA,
