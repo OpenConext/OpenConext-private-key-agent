@@ -10,18 +10,19 @@ use App\Backend\Pkcs11SigningBackend;
 use App\Config\BackendGroupConfig;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 class Pkcs11BackendTypeFactoryTest extends TestCase
 {
     public function testSupportsPkcs11Type(): void
     {
-        $factory = new Pkcs11BackendTypeFactory();
+        $factory = new Pkcs11BackendTypeFactory(new NullLogger());
         $this->assertTrue($factory->supports('pkcs11'));
     }
 
     public function testDoesNotSupportOtherTypes(): void
     {
-        $factory = new Pkcs11BackendTypeFactory();
+        $factory = new Pkcs11BackendTypeFactory(new NullLogger());
         $this->assertFalse($factory->supports('openssl'));
         $this->assertFalse($factory->supports('unknown'));
     }
@@ -37,7 +38,7 @@ class Pkcs11BackendTypeFactoryTest extends TestCase
             pkcs11Pin: '1234',
             pkcs11KeyLabel: 'test',
         );
-        $factory = new Pkcs11BackendTypeFactory();
+        $factory = new Pkcs11BackendTypeFactory(new NullLogger());
 
         $backend = $factory->createSigningBackend($config);
         $this->assertInstanceOf(Pkcs11SigningBackend::class, $backend);
@@ -54,7 +55,7 @@ class Pkcs11BackendTypeFactoryTest extends TestCase
             pkcs11Pin: '1234',
             pkcs11KeyLabel: 'test',
         );
-        $factory = new Pkcs11BackendTypeFactory();
+        $factory = new Pkcs11BackendTypeFactory(new NullLogger());
 
         $backend = $factory->createDecryptionBackend($config);
         $this->assertInstanceOf(Pkcs11DecryptionBackend::class, $backend);

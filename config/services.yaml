@@ -1,3 +1,6 @@
+parameters:
+    log_level_default: 'info'
+
 services:
     _defaults:
         autowire: true
@@ -35,4 +38,15 @@ services:
 
     App\Security\AuthenticatorInterface: '@App\Security\TokenAuthenticator'
     App\Security\AccessControlInterface: '@App\Security\AccessControlService'
-    App\Service\KeyRegistryInterface: '@App\Service\KeyRegistry'
+    # Public alias so worker.php can retrieve the registry via $container->get() before
+    # entering the frankenphp_handle_request() loop (container->get() requires public).
+    App\Service\KeyRegistryInterface:
+        alias: App\Service\KeyRegistry
+        public: true
+
+    # Public alias so worker.php can retrieve the logger before entering the
+    # frankenphp_handle_request() loop and emit debug messages that are
+    # automatically suppressed when LOG_LEVEL is above debug.
+    Psr\Log\LoggerInterface:
+        alias: logger
+        public: true

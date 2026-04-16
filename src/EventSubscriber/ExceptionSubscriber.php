@@ -42,7 +42,7 @@ final class ExceptionSubscriber implements EventSubscriberInterface
             $exception instanceof InvalidRequestException => [400, 'invalid_request', $exception->getMessage()],
             $exception instanceof AuthenticationException => [401, 'invalid_token', $exception->getMessage()],
             $exception instanceof AccessDeniedException   => [403, 'access_denied', $exception->getMessage()],
-            $exception instanceof BackendException        => [500, 'server_error', $exception->getMessage()],
+            $exception instanceof BackendException        => [500, 'server_error', 'A backend operation failed'],
             default                                       => [500, 'server_error', 'Internal server error'],
         };
 

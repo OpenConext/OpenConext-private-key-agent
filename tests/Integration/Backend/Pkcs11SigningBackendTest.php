@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Backend;
 
+use App\Backend\Pkcs11SessionCache;
 use App\Backend\Pkcs11SigningBackend;
 use App\Config\BackendGroupConfig;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 use function extension_loaded;
 use function file_exists;
@@ -44,10 +46,15 @@ class Pkcs11SigningBackendTest extends TestCase
         );
     }
 
+    protected function tearDown(): void
+    {
+        Pkcs11SessionCache::reset();
+    }
+
     public function testSignSha256(): void
     {
         $this->assertNotNull(self::$config);
-        $backend   = new Pkcs11SigningBackend(self::$config);
+        $backend   = new Pkcs11SigningBackend(self::$config, new NullLogger());
         $hash      = hash('sha256', 'test data', true);
         $signature = $backend->sign($hash, 'rsa-pkcs1-v1_5-sha256');
 
@@ -58,14 +65,45 @@ class Pkcs11SigningBackendTest extends TestCase
     public function testIsHealthy(): void
     {
         $this->assertNotNull(self::$config);
-        $backend = new Pkcs11SigningBackend(self::$config);
+        $backend = new Pkcs11SigningBackend(self::$config, new NullLogger());
         $this->assertTrue($backend->isHealthy());
     }
 
     public function testGetName(): void
     {
         $this->assertNotNull(self::$config);
-        $backend = new Pkcs11SigningBackend(self::$config);
+        $backend = new Pkcs11SigningBackend(self::$config, new NullLogger());
         $this->assertSame('hsm-test', $backend->getName());
+    }
+
+    public function testSessionIsReusedAcrossMultipleCalls(): void
+    {
+        $this->assertNotNull(self::$config);
+        $lib  = self::$config->pkcs11Lib;
+        $slot = self::$config->pkcs11Slot;
+        $this->assertNotNull($lib);
+        $this->assertNotNull($slot);
+        $name = self::$config->name;
+
+        $backend = new Pkcs11SigningBackend(self::$config, new NullLogger());
+        $hash    = hash('sha256', 'first call', true);
+        $backend->sign($hash, 'rsa-pkcs1-v1_5-sha256');
+
+        // The session must now be in the static cache.
+        $this->assertTrue(Pkcs11SessionCache::has($name, $lib, $slot));
+        $sessionAfterFirst = Pkcs11SessionCache::get($name, $lib, $slot);
+
+        // A second backend instance simulates a new request (fresh DI container).
+        $backend2 = new Pkcs11SigningBackend(self::$config, new NullLogger());
+        $hash2    = hash('sha256', 'second call', true);
+        $backend2->sign($hash2, 'rsa-pkcs1-v1_5-sha256');
+
+        $sessionAfterSecond = Pkcs11SessionCache::get($name, $lib, $slot);
+
+        $this->assertSame(
+            $sessionAfterFirst,
+            $sessionAfterSecond,
+            'A new backend instance must reuse the cached PKCS#11 session, not open a new one',
+        );
     }
 }
