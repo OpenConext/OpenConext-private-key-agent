@@ -14,6 +14,7 @@ use App\Config\BackendGroupConfig;
 use App\Exception\BackendException;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 use function file_exists;
 use function openssl_pkey_export_to_file;
@@ -48,7 +49,7 @@ class BackendFactoryTest extends TestCase
     public function testCreateSigningBackendForOpenssl(): void
     {
         $config  = new BackendGroupConfig(name: 'test', type: 'openssl', keyPath: self::$keyPath);
-        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory()]);
+        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory(new NullLogger())]);
 
         $backend = $factory->createSigningBackend($config);
         $this->assertInstanceOf(OpenSslSigningBackend::class, $backend);
@@ -57,7 +58,7 @@ class BackendFactoryTest extends TestCase
     public function testCreateDecryptionBackendForOpenssl(): void
     {
         $config  = new BackendGroupConfig(name: 'test', type: 'openssl', keyPath: self::$keyPath);
-        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory()]);
+        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory(new NullLogger())]);
 
         $backend = $factory->createDecryptionBackend($config);
         $this->assertInstanceOf(OpenSslDecryptionBackend::class, $backend);
@@ -74,7 +75,7 @@ class BackendFactoryTest extends TestCase
             pkcs11Pin: '1234',
             pkcs11KeyLabel: 'test',
         );
-        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory()]);
+        $factory = new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory(new NullLogger())]);
 
         $backend = $factory->createSigningBackend($config);
         $this->assertInstanceOf(Pkcs11SigningBackend::class, $backend);

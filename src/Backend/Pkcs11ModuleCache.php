@@ -20,6 +20,23 @@ final class Pkcs11ModuleCache
 
     public static function get(string $libraryPath): Module
     {
-        return self::$modules[$libraryPath] ??= new Module($libraryPath);
+        if (! isset(self::$modules[$libraryPath])) {
+            self::$modules[$libraryPath] = new Module($libraryPath);
+        }
+
+        return self::$modules[$libraryPath];
+    }
+
+    public static function has(string $libraryPath): bool
+    {
+        return isset(self::$modules[$libraryPath]);
+    }
+
+    /**
+     * Remove all cached modules. Intended for use in tests only.
+     */
+    public static function reset(): void
+    {
+        self::$modules = [];
     }
 }

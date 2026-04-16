@@ -149,7 +149,7 @@ For RSA PKCS#1 OAEP decryption, additional parameters are needed: the MGF1 hash 
 | PKCS#11 bridge | `gamringer/php-pkcs11` PHP extension |
 | Logging | Monolog with JSON formatter to stdout |
 | Testing | PHPUnit with mock interfaces |
-| Deployment | Docker (PHP-FPM image + Caddy sidecar) |
+| Deployment | Docker (FrankenPHP worker mode, single container with embedded Caddy) |
 
 > **PHP 8.5 is a hard requirement.** PHP 8.5 adds an optional `digest_algo` parameter to `openssl_private_decrypt()` and `openssl_public_encrypt()`, which is the only way to select the OAEP hash algorithm (SHA-256, SHA-384, SHA-512, etc.) when using the OpenSSL backend. Prior to PHP 8.5, `OPENSSL_PKCS1_OAEP_PADDING` hard-codes SHA-1 for both the hash and MGF1 hash, making the `rsa-pkcs1-oaep-mgf1-sha256/384/512` algorithm variants impossible to implement in the OpenSSL backend. Downgrading to PHP 8.4 would require restricting the OpenSSL backend to `rsa-pkcs1-oaep-mgf1-sha1` only.
 >
@@ -319,7 +319,7 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 
 ### Loading
 
-The agent configuration is loaded from a YAML file at runtime. The path is set via the `PRIVATE_KEY_AGENT_CONFIG` environment variable. The file is loaded during Symfony kernel boot. If the file is missing, unreadable, or invalid, the application fails fast — the PHP-FPM worker will not start and will log the error.
+The agent configuration is loaded from a YAML file at runtime. The path is set via the `PRIVATE_KEY_AGENT_CONFIG` environment variable. The file is loaded during Symfony kernel boot. If the file is missing, unreadable, or invalid, the application fails fast — the FrankenPHP worker will not start and will log the error.
 
 ### Environment variable references
 
@@ -421,111 +421,122 @@ Each entry in `keys` defines a logical key identity that clients can reference. 
 
 ## Project Structure
 
-```
-/
-├── bin/
-│   └── console
-├── config/
-│   ├── packages/
-│   │   ├── monolog.yaml
-│   │   ├── nelmio_api_doc.yaml
-│   │   └── security.yaml
-│   ├── routes.yaml
-│   └── services.yaml
-├── docker/
-│   ├── Dockerfile
-│   ├── Caddyfile
-│   ├── app.ini
-│   └── php-fpm.conf
-├── compose.yaml
-├── src/
-│   ├── Backend/
-│   │   ├── BackendFactory.php
-│   │   ├── BackendInterface.php
-│   │   ├── BackendTypeFactoryInterface.php
-│   │   ├── DecryptionBackendInterface.php
-│   │   ├── OpenSslBackendTypeFactory.php
-│   │   ├── OpenSslDecryptionBackend.php
-│   │   ├── OpenSslSigningBackend.php
-│   │   ├── Pkcs11BackendTypeFactory.php
-│   │   ├── Pkcs11DecryptionBackend.php
-│   │   ├── Pkcs11ModuleCache.php
-│   │   └── SigningBackendInterface.php
-│   ├── Command/
-│   │   └── ValidateConfigCommand.php
-│   ├── Config/
-│   │   ├── AgentConfig.php
-│   │   ├── BackendGroupConfig.php
-│   │   ├── ClientConfig.php
-│   │   ├── ConfigLoader.php
-│   │   ├── ConfigProvider.php
-│   │   └── KeyConfig.php
-│   ├── Controller/
-│   │   ├── DecryptController.php
-│   │   ├── HealthController.php
-│   │   └── SignController.php
-│   ├── Crypto/
-│   │   └── DigestInfoBuilder.php
-│   ├── Dto/
-│   │   ├── DecryptRequest.php
-│   │   └── SignRequest.php
-│   ├── EventSubscriber/
-│   │   └── ExceptionSubscriber.php
-│   ├── Exception/
-│   │   ├── AccessDeniedException.php
-│   │   ├── AuthenticationException.php
-│   │   ├── BackendException.php
-│   │   ├── InvalidConfigurationException.php
-│   │   └── InvalidRequestException.php
-│   ├── Security/
-│   │   ├── AccessControlInterface.php
-│   │   ├── AccessControlService.php
-│   │   ├── AuthenticatorInterface.php
-│   │   └── TokenAuthenticator.php
-│   ├── Service/
-│   │   ├── KeyRegistry.php
-│   │   ├── KeyRegistryBootstrapper.php
-│   │   └── KeyRegistryInterface.php
-│   └── Validator/
-│       ├── Base64.php
-│       └── Base64Validator.php
-├── tests/
-│   ├── bootstrap.php
-│   ├── Integration/
-│   │   └── Backend/
-│   │       ├── OpenSslDecryptionBackendTest.php
-│   │       ├── OpenSslSigningBackendTest.php
-│   │       ├── Pkcs11DecryptionBackendTest.php
-│   │       └── Pkcs11SigningBackendTest.php
-│   └── Unit/
-│       ├── Backend/
-│       │   ├── BackendFactoryTest.php
-│       │   ├── OpenSslBackendTypeFactoryTest.php
-│       │   └── Pkcs11BackendTypeFactoryTest.php
-│       ├── Command/
-│       │   └── ValidateConfigCommandTest.php
-│       ├── Config/
-│       │   └── ConfigLoaderTest.php
-│       ├── Controller/
-│       │   ├── DecryptControllerTest.php
-│       │   ├── HealthControllerTest.php
-│       │   └── SignControllerTest.php
-│       ├── Crypto/
-│       │   └── DigestInfoBuilderTest.php
-│       ├── Dto/
-│       │   ├── DecryptRequestTest.php
-│       │   └── SignRequestTest.php
-│       ├── EventSubscriber/
-│       │   └── ExceptionSubscriberTest.php
-│       ├── Security/
-│       │   ├── AccessControlServiceTest.php
-│       │   └── TokenAuthenticatorTest.php
-│       ├── Service/
-│       │   ├── KeyRegistryBootstrapperTest.php
-│       │   └── KeyRegistryTest.php
-│       └── Validator/
-│           └── Base64ValidatorTest.php
-└── composer.json
+### Folder Layout
+
+| Directory | Purpose |
+|---|---|
+| `bin/` | Symfony console entry point (`bin/console`) |
+| `config/` | Symfony configuration: routing, service wiring, and package configs (monolog, nelmio, security) |
+| `docker/` | Docker build artefacts: multi-stage `Dockerfile`, embedded `Caddyfile`, PHP ini files, and the ZTS patch script for `php-pkcs11` |
+| `public/` | Web root: `index.php` (direct entry point) and `worker.php` (FrankenPHP worker-loop entry point) |
+| `src/Backend/` | Cryptographic backend implementations (OpenSSL and PKCS#11), backend factory, backend interfaces, and per-worker PKCS#11 caching utilities (`Pkcs11ModuleCache`, `Pkcs11SessionCache`, `Pkcs11SessionManager`) |
+| `src/Command/` | Symfony console commands; currently `ValidateConfigCommand` for offline configuration validation |
+| `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, backend group, key, and client configuration |
+| `src/Controller/` | REST API controllers: `SignController`, `DecryptController`, `HealthController` |
+| `src/Crypto/` | Low-level cryptographic utilities; currently `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing) |
+| `src/Dto/` | Request data transfer objects (`SignRequest`, `DecryptRequest`) with Symfony validation constraints |
+| `src/EventSubscriber/` | `ExceptionSubscriber` maps domain exceptions to RFC 6750 HTTP error responses |
+| `src/Exception/` | Domain exception hierarchy (`AuthenticationException`, `AccessDeniedException`, `BackendException`, `InvalidRequestException`, `InvalidConfigurationException`) |
+| `src/Security/` | Authentication (`TokenAuthenticator`) and key-level access control (`AccessControlService`) |
+| `src/Service/` | Key registry (`KeyRegistry`, `KeyRegistryBootstrapper`, `KeyRegistryInterface`) — maps logical key names to backend instances with round-robin distribution |
+| `src/Validator/` | Custom Symfony validation constraint (`Base64`, `Base64Validator`) |
+| `tests/Unit/` | Unit tests using mocks; no I/O or cryptographic operations required |
+| `tests/Integration/` | Integration tests for the cryptographic backends against real key material (OpenSSL key pair; SoftHSM2 for PKCS#11) |
+| `tools/` | Operator scripts (smoke test endpoint script) |
+| `var/` | Symfony runtime cache and logs (excluded from VCS) |
+
+### Key Class Overview
+
+The diagram below shows the main classes and their relationships. Configuration value objects and static cache utilities are omitted for clarity; they are described individually in the [Key Components](#key-components) section below.
+
+```mermaid
+classDiagram
+    class BackendInterface {
+        <<interface>>
+        +getName() string
+        +isHealthy() bool
+        +getPublicKeyFingerprint() string
+    }
+    class SigningBackendInterface {
+        <<interface>>
+        +sign(hash, algorithm) string
+    }
+    class DecryptionBackendInterface {
+        <<interface>>
+        +decrypt(ciphertext, algorithm, label) string
+    }
+    BackendInterface <|-- SigningBackendInterface
+    BackendInterface <|-- DecryptionBackendInterface
+
+    class OpenSslSigningBackend
+    class OpenSslDecryptionBackend
+    class Pkcs11SigningBackend
+    class Pkcs11DecryptionBackend
+    SigningBackendInterface <|.. OpenSslSigningBackend
+    DecryptionBackendInterface <|.. OpenSslDecryptionBackend
+    SigningBackendInterface <|.. Pkcs11SigningBackend
+    DecryptionBackendInterface <|.. Pkcs11DecryptionBackend
+
+    class Pkcs11SessionManager {
+        +ensureSession() Session
+        +ensurePrivateKey() Key
+        +invalidateSession()
+        +isSessionError(e) bool
+    }
+    Pkcs11SigningBackend --> Pkcs11SessionManager
+    Pkcs11DecryptionBackend --> Pkcs11SessionManager
+
+    class DigestInfoBuilder {
+        <<utility>>
+        +build(algorithm, hash) string
+    }
+    OpenSslSigningBackend --> DigestInfoBuilder
+    Pkcs11SigningBackend --> DigestInfoBuilder
+
+    class KeyRegistryInterface {
+        <<interface>>
+        +getSigningBackend(keyName) SigningBackendInterface
+        +getDecryptionBackend(keyName) DecryptionBackendInterface
+    }
+    class KeyRegistry {
+        +getSigningBackend(keyName) SigningBackendInterface
+        +getDecryptionBackend(keyName) DecryptionBackendInterface
+        +getAllBackends() list
+    }
+    KeyRegistryInterface <|.. KeyRegistry
+    class KeyRegistryBootstrapper {
+        +bootstrap()
+    }
+    KeyRegistryBootstrapper --> KeyRegistry : populates
+
+    class BackendFactory {
+        +build() map
+    }
+    BackendFactory --> KeyRegistryBootstrapper
+    BackendFactory ..> BackendInterface : creates
+
+    class ConfigProvider {
+        +getConfig() AgentConfig
+    }
+    BackendFactory --> ConfigProvider
+
+    class TokenAuthenticator {
+        +authenticate(token) ClientConfig
+    }
+    class AccessControlService {
+        +assertAccess(client, keyName)
+    }
+
+    class SignController
+    class DecryptController
+    class HealthController
+    SignController --> TokenAuthenticator
+    SignController --> AccessControlService
+    SignController --> KeyRegistryInterface
+    DecryptController --> TokenAuthenticator
+    DecryptController --> AccessControlService
+    DecryptController --> KeyRegistryInterface
+    HealthController --> KeyRegistryInterface
 ```
 
 ---
@@ -579,8 +590,8 @@ Responsible for instantiating all backend objects at boot. Delegates per-type co
 - `KeyRegistry` holds two separate maps: one for signing backends (key name → list of `SigningBackendInterface`) and one for decryption backends (key name → list of `DecryptionBackendInterface`).
 - Provides `getSigningBackend(string $keyName): SigningBackendInterface` and `getDecryptionBackend(string $keyName): DecryptionBackendInterface` methods.
 - If a key name is not registered for the requested operation, the registry throws `InvalidRequestException` (→ 400).
-- Implements round-robin selection across backends for a given key name using per-instance counter arrays (`$signingCounters`, `$decryptionCounters`). The counter resets on process restart; cross-process distribution is handled naturally by PHP-FPM assigning each request to a worker.
-- **Lazy key equivalence check**: on the first request for a given `key_name` that maps to multiple backends, asserts all `getPublicKeyFingerprint()` values are identical. Throws `InvalidConfigurationException` if any mismatch is detected, logging the offending key name and the differing fingerprints. This check is performed lazily inside the worker process, as PKCS#11 `C_Initialize` and session creation do not safely survive FPM's `fork()` from the master process.
+- Implements round-robin selection across backends for a given key name using per-instance counter arrays (`$signingCounters`, `$decryptionCounters`). The counter resets when a worker restarts (after reaching its max_requests recycle limit); distribution across workers is handled naturally by FrankenPHP routing each request to an available worker.
+- **Lazy key equivalence check**: on the first request for a given `key_name` that maps to multiple backends, asserts all `getPublicKeyFingerprint()` values are identical. Throws `InvalidConfigurationException` if any mismatch is detected, logging the offending key name and the differing fingerprints. This check is performed lazily on the first request handled by each worker.
 
 ### `TokenAuthenticator`
 
@@ -677,22 +688,107 @@ The DER prefixes are well-known constants from RFC 3447 §9.2 / PKCS#1:
 
 ### `Pkcs11SigningBackend`
 
-- Lazily opens a PKCS#11 session on first use within the PHP-FPM worker using the configured library, slot, and PIN. This avoids `fork()` state corruption issues from the master process.
+- Lazily opens a PKCS#11 session on first use within the FrankenPHP worker using the configured library, slot, and PIN. The session is then reused for all subsequent requests handled by that worker.
 - Implements inline session recovery: catches session errors (`CKR_SESSION_CLOSED`, `CKR_DEVICE_REMOVED`, etc.), forces a re-initialization sequence, and retries the signing operation before giving up.
 - Maps algorithm string to PKCS#11 mechanism and delegates DigestInfo construction to `DigestInfoBuilder` before calling `C_Sign` with `CKM_RSA_PKCS`.
 - `isHealthy()` calls `C_GetSessionInfo` to verify the session is still valid (opening it first if needed).
 
 ### `Pkcs11DecryptionBackend`
 
-- Lazily opens a PKCS#11 session on first use within the PHP-FPM worker. This avoids `fork()` state corruption issues from the master process.
+- Lazily opens a PKCS#11 session on first use within the FrankenPHP worker. The session is then reused for all subsequent requests handled by that worker.
 - Implements inline session recovery: catches session errors, forces a re-initialization sequence, and retries the decryption operation before giving up.
 - Maps algorithm string to PKCS#11 mechanism (e.g. `CKM_RSA_PKCS`, `CKM_RSA_PKCS_OAEP`).
 - For OAEP algorithms, constructs `Pkcs11\RsaOaepParams` passing the hash algorithm, MGF1 algorithm, and optional label (source data) and bounds it to `Pkcs11\Mechanism`.
 - `isHealthy()` calls `C_GetSessionInfo` (opening the session first if needed).
 
+### PKCS#11 Session Persistence
+
+Three classes collaborate to manage PKCS#11 module handles and session handles across FrankenPHP worker threads and individual HTTP requests. Their lifetime scopes are deliberately different:
+
+| Class | Scope | Persists across requests? |
+|---|---|---|
+| `Pkcs11ModuleCache` | Process-wide static (thread-local in ZTS) | Yes — held for the entire worker thread lifetime |
+| `Pkcs11SessionCache` | Thread-local static (thread-local in ZTS) | Yes — held for the entire worker thread lifetime |
+| `Pkcs11SessionManager` | Per-request (DI-injected, new instance each request) | No — wraps the persistent caches but is itself transient |
+
+```mermaid
+classDiagram
+    class Pkcs11ModuleCache {
+        <<static>>
+        -Module[] modules$
+        +get(libraryPath) Module$
+        +has(libraryPath) bool$
+        +reset()$
+    }
+    class Pkcs11SessionCache {
+        <<static>>
+        -Session[] sessions$
+        +cacheKey(backendName, libraryPath, slotIndex) string$
+        +get(backendName, libraryPath, slotIndex) Session|null$
+        +set(backendName, libraryPath, slotIndex, session)$
+        +has(backendName, libraryPath, slotIndex) bool$
+        +invalidate(backendName, libraryPath, slotIndex)$
+        +reset()$
+    }
+    class Pkcs11SessionManager {
+        -BackendGroupConfig config
+        -Key|null privateKey
+        +ensureSession() Session
+        +ensurePrivateKey() Key
+        +invalidateSession()
+        +isSessionError(e) bool
+        -findPrivateKey(session) Key
+    }
+    class Pkcs11SigningBackend {
+        +sign(hash, algorithm) string
+        +isHealthy() bool
+        +getPublicKeyFingerprint() string
+    }
+    class Pkcs11DecryptionBackend {
+        +decrypt(ciphertext, algorithm, label) string
+        +isHealthy() bool
+        +getPublicKeyFingerprint() string
+    }
+    class BackendGroupConfig {
+        +name string
+        +pkcs11Lib string
+        +pkcs11Slot int
+        +pkcs11Pin string
+        +pkcs11KeyLabel string
+        +pkcs11KeyId string
+        +environment array
+    }
+
+    Pkcs11SigningBackend --> Pkcs11SessionManager : per-request instance
+    Pkcs11DecryptionBackend --> Pkcs11SessionManager : per-request instance
+    Pkcs11SessionManager --> Pkcs11ModuleCache : reads and writes (process-wide)
+    Pkcs11SessionManager --> Pkcs11SessionCache : reads and writes (thread-local)
+    Pkcs11SessionManager --> BackendGroupConfig : configured by
+```
+
 ### `Pkcs11ModuleCache`
 
-Prevents double `C_Initialize` calls when multiple PKCS#11 backends share the same library (`.so` path) within a single PHP-FPM worker process. On the first use of a given library path, `C_Initialize` is called once; subsequent backends using the same path receive the already-initialised `Pkcs11\Module` instance from the cache.
+Per-worker cache of `\Pkcs11\Module` instances, keyed by library path. In FrankenPHP worker mode, a static property on a class persists for the lifetime of the worker thread (not just the request). `Pkcs11ModuleCache` uses a static array to ensure each `.so` library is loaded and `C_Initialize`-d exactly once per worker thread. Subsequent PKCS#11 backends that reference the same library path share the already-initialised `Module` object.
+
+Without this cache, each new `Pkcs11\Module($lib)` construction would call `C_Initialize` again. With the ZTS-patched extension this is tolerated (the patch makes the second call return `CKR_CRYPTOKI_ALREADY_INITIALIZED` and continue), but it would still create unnecessary duplicate module objects.
+
+### `Pkcs11SessionCache`
+
+Per-worker cache of `\Pkcs11\Session` instances, keyed by `backendName:libraryPath:slotIndex`. Static properties in PHP ZTS are scoped to each thread (each FrankenPHP worker runs as a separate thread), so the session opened by one worker is never visible to another worker — there is no cross-thread sharing or locking at this level.
+
+Sessions are opened lazily on first use and then reused for all subsequent requests handled by the same worker. This avoids `C_OpenSession` and `C_Login` round-trips on every request. The cache is invalidated and the session re-established whenever a PKCS#11 session error (e.g. `CKR_SESSION_CLOSED`, `CKR_DEVICE_REMOVED`) is detected.
+
+### `Pkcs11SessionManager`
+
+Per-request service (new DI instance per HTTP request). Wraps `Pkcs11SessionCache` and `Pkcs11ModuleCache` to provide the following lifecycle management:
+
+1. **`ensureSession()`**: Checks `Pkcs11SessionCache`; returns the cached session if present. Otherwise sets vendor environment variables via `putenv()`, fetches the `Module` from `Pkcs11ModuleCache`, calls `C_OpenSession` and (if `pkcs11_pin` is set) `C_Login`. Tolerates `CKR_USER_ALREADY_LOGGED_IN` (PKCS#11 treats the whole token as logged in once any session authenticates). Stores the new session in `Pkcs11SessionCache`.
+
+2. **`ensurePrivateKey()`**: Calls `ensureSession()`, then finds the private key by `CKA_LABEL` / `CKA_ID` template match if not already found. The `Key` object is held as a per-request instance variable (not cached across requests — it is re-fetched cheaply from the cached session).
+
+3. **`invalidateSession()`**: Removes the entry from `Pkcs11SessionCache` and clears the private key reference. Called by the signing/decryption backends when a session error is detected so the next operation triggers a full reconnect.
+
+4. **`isSessionError(Exception $e)`**: Tests the PKCS#11 error code against a set of recoverable session errors: `CKR_SESSION_CLOSED` (0xB0), `CKR_SESSION_HANDLE_INVALID` (0xB3), `CKR_DEVICE_ERROR` (0x30), `CKR_DEVICE_REMOVED` (0x32), `CKR_TOKEN_NOT_PRESENT` (0xE0), `CKR_TOKEN_NOT_RECOGNIZED` (0xE1).
 
 ### `ValidateConfigCommand`
 
@@ -838,7 +934,7 @@ final class DecryptRequest
 
 ## Logging
 
-Monolog with a JSON formatter writes to stdout (12-factor app). PHP-FPM error log goes to stderr.
+Monolog with a JSON formatter writes to stdout (12-factor app). The log level is controlled by the `LOG_LEVEL` environment variable (default: `info`). FrankenPHP's own access log and error output also go to stdout/stderr.
 
 | Level | Events |
 |---|---|
@@ -891,40 +987,225 @@ The `gamringer/php-pkcs11` extension is installed as a system package in the Doc
 
 Three stages:
 
-- **`base`**: `php:8.5-fpm-alpine` with `opcache` and the `gamringer/php-pkcs11` PECL extension installed. Composer binary is copied in. Includes a workaround for a musl libc / readline symbol conflict (see note below).
-- **`prod`**: Extends `base` with production Composer dependencies, optimised autoloader, custom PHP-FPM pool config (`docker/php-fpm.conf`), PHP OPcache settings copied from `docker/app.ini`, and a pre-warmed Symfony cache (`APP_DEBUG=0`). Runs as `www-data`.
-- **`dev`**: Extends `prod` with SoftHSM2 and OpenSC installed. An RSA-2048 test key pair is pre-generated in the image so that the PKCS#11 integration tests can run without any host-side HSM. Re-runs Composer install to add dev dependencies and regenerates the autoloader.
+- **`base`**: `dunglas/frankenphp:1-php8.5-bookworm` (Debian 12, PHP 8.5 ZTS with embedded Caddy). The `gamringer/php-pkcs11` extension is built from source (tag `v1.1.3`) because the upstream package does not support PHP ZTS out of the box. A Perl patch script (`docker/pkcs11-zts-patch.pl`) modifies `pkcs11module.c` before compilation; see the [ZTS patch section](#zts-patches-for-gamringerphp-pkcs11) below for details. Composer binary is copied in.
+- **`prod`**: Extends `base` with production Composer dependencies, optimised autoloader, PHP OPcache settings from `docker/app.ini`, and a pre-warmed Symfony cache (`APP_DEBUG=0`). Runs as root (required to bind port 443); `opcache.preload_user = www-data` in `app.ini` drops privileges for the preload phase.
+- **`dev`**: Extends `prod` with `softhsm2` and `opensc` installed from the Debian package repository. An RSA-2048 test key pair is pre-generated in the image so that the PKCS#11 integration tests can run without any host-side HSM.
 
-> **Alpine / musl libc workaround: `php_cli_get_shell_callbacks` stub**
+> **Why Debian instead of Alpine**
 >
-> The official `php:8.5-fpm-alpine` image compiles PHP with `--with-readline`, statically linking the readline module into both the CLI and FPM binaries. The readline code references `php_cli_get_shell_callbacks` — a symbol defined only in the CLI SAPI, not in PHP-FPM. On glibc (Debian), this dangling reference is harmless because glibc supports true lazy binding: the symbol is only resolved if the code path that calls it actually executes (which never happens in FPM). On musl libc (Alpine), lazy binding works differently. When the `gamringer/php-pkcs11` extension loads a PKCS#11 module via `dlopen(path, RTLD_NOW)`, musl resolves all pending relocations across every loaded shared object — not just the library being opened. This triggers resolution of the readline reference, which fails with `Symbol not found: php_cli_get_shell_callbacks`.
->
-> The Dockerfile works around this by compiling a minimal shared library that exports a no-op stub for this symbol and injecting it via `LD_PRELOAD`. The stub is a single C function returning `NULL` (~4 KB).
->
-> **Alternatives considered:**
-> - **Switch to a Debian-based image** (`php:8.5-fpm-bookworm`): eliminates the problem entirely since glibc handles lazy binding correctly. Trade-off is ~5× larger image size (~450 MB vs ~80 MB).
-> - **Rebuild PHP without `--with-readline`**: would remove the dangling symbol, but requires maintaining a custom PHP build and loses `php -a` interactive shell support in the CLI.
-> - **Patch `php-pkcs11` to use `RTLD_LAZY`**: would defer symbol resolution, but weakens load-time safety guarantees — inappropriate for a cryptographic module loader.
-> - **Switch to FrankenPHP**: its multi-threaded SAPI (ZTS) requires all extensions to be thread-safe. The `gamringer/php-pkcs11` extension has no verified thread-safety guarantees, making this unsuitable for a service that performs private key operations.
->
-> The current stub approach is the least invasive option that preserves Alpine's small image size while keeping the standard PHP-FPM process model. If image size is not a concern, switching to a Debian-based image is the most maintainable long-term solution.
+> The Alpine image required a musl libc `LD_PRELOAD` stub workaround: musl's `RTLD_NOW` flag resolves all pending lazy relocations across every loaded DSO when any `dlopen(RTLD_NOW)` is called, including a dangling reference to `php_cli_get_shell_callbacks` — a symbol defined only in the CLI SAPI. This caused PKCS#11 library loading to fail in PHP-FPM. Debian's glibc uses true lazy binding and never triggers this, eliminating the stub entirely. The switch to FrankenPHP (which requires Debian for ZTS support) also removes the Alpine dependency.
 
 ### PHP configuration (`docker/app.ini`)
 
 OPcache and PHP runtime settings are stored in `docker/app.ini` instead of being generated inline in the Dockerfile. The file is `COPY`'d into the production image and volume-mounted from the host in `compose.yaml`, making it easy to tune settings without rebuilding.
 
-### Caddy sidecar (`docker/Caddyfile`)
+### Embedded Caddy (`docker/Caddyfile`)
 
-- TLS termination
-- `php_fastcgi` directive pointing to the PHP-FPM container on port 9000
-- No rate limiting (operator responsibility)
+FrankenPHP includes Caddy as an embedded server — no separate sidecar container is needed.
+
+The Caddyfile uses FrankenPHP's native `php_server` directive instead of FastCGI reverse proxy:
+
+- Global `frankenphp {}` block declares 16 persistent PHP workers running `public/worker.php` in a loop.
+- `localhost` site block: `tls internal` for TLS, `php_server` to dispatch requests to workers, security headers (`-Server`, `X-Content-Type-Options`, `X-Frame-Options`), JSON access log to stdout.
+- No rate limiting (operator responsibility).
 
 ### `compose.yaml`
 
-The compose file is intended for development. Two services:
+The compose file is intended for development. Single service:
 
-- `app`: PHP-FPM container (`dev` stage), mounts config file and `docker/app.ini` as read-only volumes, sets `PRIVATE_KEY_AGENT_CONFIG`.
-- `caddy`: Caddy container, mounts `docker/Caddyfile`, depends on `app`.
+- `app`: FrankenPHP container (`dev` stage), mounts the application source tree, config file, `docker/app.dev.ini`, and `docker/Caddyfile` as read-only volumes. Exposes port 443. Does not set `PRIVATE_KEY_AGENT_CONFIG` explicitly in the compose file — the value must be supplied via a `.env` file or shell environment. Worker recycling is controlled by the `FRANKENPHP_LOOP_MAX` environment variable (default in `worker.php`: 2000 requests per worker); it is not set in the compose file, so workers recycle after 2000 requests by default.
+
+---
+
+## FrankenPHP Concurrency Model
+
+### Overview
+
+FrankenPHP runs PHP in **worker mode**: a fixed pool of long-lived OS threads, each executing one PHP worker script (`public/worker.php`) in a continuous loop. Every thread handles one HTTP request at a time — there is no async within a single worker. Concurrency comes entirely from having multiple worker threads.
+
+The FrankenPHP base image (`dunglas/frankenphp:1-php8.5-bookworm`) is a **ZTS (Zend Thread Safety)** build of PHP. In a ZTS PHP build each thread has its own copy of the PHP executor globals, but static class properties are thread-local by default (each thread sees its own copy of a static property). This is the property that the PKCS#11 session and module caches rely on.
+
+```
+Process
+├── Worker Thread 1  ──── static Pkcs11SessionCache::$sessions [ "backend-a:lib:0" => Session ]
+│                    ──── static Pkcs11ModuleCache::$modules   [ "/usr/lib/softhsm2.so" => Module ]
+├── Worker Thread 2  ──── static Pkcs11SessionCache::$sessions [ "backend-a:lib:0" => Session ]
+│                    ──── static Pkcs11ModuleCache::$modules   [ "/usr/lib/softhsm2.so" => Module ]
+└── Worker Thread N  ──── ...
+```
+
+### Static Properties as Thread-Local Storage
+
+In PHP ZTS, static class properties are stored in the per-thread executor globals. Their values **do not** persist across PHP-FPM request boundaries in a traditional FPM setup, but in FrankenPHP worker mode the worker thread *never restarts between requests* — it loops and handles the next request in the same PHP context. Static properties therefore persist across all requests handled by the same worker thread for the thread's entire lifetime (bounded by `FRANKENPHP_LOOP_MAX`).
+
+This means:
+
+- `Pkcs11SessionCache::$sessions` holds PKCS#11 session handles that survive from request to request within a worker.
+- `Pkcs11ModuleCache::$modules` holds the loaded `\Pkcs11\Module` objects (one per library path) that also persist across requests.
+- `KeyRegistry`'s round-robin counters (`$signingCounters`, `$decryptionCounters`) also persist, so each worker independently cycles through backends.
+
+Each worker thread has its own independent copies of all these caches — there is no cross-thread sharing, no mutex needed at the PHP level.
+
+### Worker Entry-Point: `public/worker.php`
+
+`public/worker.php` is the custom FrankenPHP worker entry-point (declared in the `Caddyfile` worker directive). It differs from the default `public/index.php` entry-point in two ways:
+
+1. **Pre-initialisation outside the request loop.** Before entering the `frankenphp_handle_request()` loop, it boots the Symfony kernel once and then calls `$backend->isHealthy()` for every registered backend. For PKCS#11 backends, `isHealthy()` calls `ensureSession()` (via `Pkcs11SessionManager`), which opens the HSM session and performs `C_Login`. The session handle is stored in `Pkcs11SessionCache`. From that point on, every request handled by this worker thread reuses the open session — no `C_OpenSession` or `C_Login` on the hot path.
+
+2. **Request loop with bounded recycling.** The loop runs until FrankenPHP signals shutdown (`$ret === false`) or the worker has processed `FRANKENPHP_LOOP_MAX` requests (default: 2000). After each request, `$kernel->terminate()` is called outside the callback and `gc_collect_cycles()` forces a GC cycle. On exit the worker thread is respawned by FrankenPHP automatically.
+
+```php
+// Pseudocode of worker.php structure
+$kernel->boot();
+foreach ($registry->getAllBackends() as $backend) {
+    $backend->isHealthy(); // Opens PKCS#11 session eagerly — cached in Pkcs11SessionCache
+}
+
+do {
+    $ret = frankenphp_handle_request(function () use ($kernel) {
+        $response = $kernel->handle(Request::createFromGlobals());
+        $response->send();
+    });
+    $kernel->terminate(...);
+    gc_collect_cycles();
+} while ($ret && $loops++ < $maxRequests);
+```
+
+### PKCS#11 Session Lifecycle per Worker
+
+```
+Worker startup
+    └─ worker.php boots kernel
+    └─ foreach backend → isHealthy()
+           └─ Pkcs11SessionManager::ensureSession()
+                  └─ Pkcs11ModuleCache::get($lib)     ← dlopen, C_Initialize (once per lib)
+                  └─ $module->openSession($slotId)     ← C_OpenSession
+                  └─ $session->login(CKU_USER, $pin)   ← C_Login
+                  └─ Pkcs11SessionCache::set(...)      ← cached for lifetime of worker
+
+Request N (hot path)
+    └─ Pkcs11SessionManager::ensureSession()
+           └─ Pkcs11SessionCache::get(...)             ← cache hit, no C_OpenSession/C_Login
+
+Request N (session error path)
+    └─ C_Sign / C_Decrypt raises CKR_SESSION_CLOSED
+    └─ Backend catches exception, calls invalidateSession()
+           └─ Pkcs11SessionCache::invalidate(...)
+    └─ Backend calls ensurePrivateKey() again
+           └─ ensureSession() → cache miss → full reconnect
+    └─ Retry the cryptographic operation once
+
+Worker recycle (after FRANKENPHP_LOOP_MAX requests)
+    └─ Loop exits; FrankenPHP spawns replacement worker thread
+    └─ Static properties cleared; new thread starts fresh
+```
+
+### `putenv()` and Vendor Environment Variables
+
+The `environment:` block in each PKCS#11 backend group config is applied via `putenv()` before the module is loaded. `putenv()` modifies the **process-wide** C environment, which is shared across all worker threads. In practice this is safe because all workers set the same values (the config is immutable after boot), so concurrent calls are idempotent. The `putenv()` calls happen before `Pkcs11ModuleCache::get()` stores the `Module` object; once the module is cached subsequent session opens do not re-call `putenv()`.
+
+### Worker Count and HSM Session Budget
+
+Each worker thread holds one PKCS#11 session per configured PKCS#11 backend group. The total number of sessions the agent opens against an HSM is:
+
+```
+sessions = replicas × worker_count × pkcs11_backend_groups_per_worker
+```
+
+The worker count is set in the `Caddyfile` (currently 16). This must not exceed the HSM's session limit. See the Performance Requirements section for sizing guidance.
+
+---
+
+## ZTS Patches for `gamringer/php-pkcs11`
+
+### Why patches are needed
+
+FrankenPHP runs PHP in ZTS (thread-safe) mode with multiple worker threads inside one process. The upstream `gamringer/php-pkcs11` extension (tag `v1.1.3`) was written for a single-threaded PHP SAPI (PHP-FPM NTS). It has three thread-safety bugs that cause crashes or undefined behaviour under FrankenPHP ZTS:
+
+1. **No serialisation of `C_Initialize`.** Multiple worker threads each construct a `new Module()` on startup. Without a mutex, two threads can call `C_Initialize` concurrently, which is undefined behaviour according to the PKCS#11 spec.
+
+2. **`C_Initialize` called more than once is treated as a fatal error.** The second thread to call `C_Initialize` (even sequentially) receives `CKR_CRYPTOKI_ALREADY_INITIALIZED` (0x91) and the original code treats this as an unrecoverable error.
+
+3. **`C_Finalize` and `dlclose` are process-global operations called per-object.** When a worker thread is recycled (its `Module` PHP object is garbage-collected), `C_Finalize(NULL)` tears down the PKCS#11 library for the entire process while other threads are still mid-operation, causing `SIGSEGV`.
+
+### Patch script: `docker/pkcs11-zts-patch.pl`
+
+The Perl script `docker/pkcs11-zts-patch.pl` applies four targeted source patches to `pkcs11module.c` during the Docker build, before `phpize && ./configure && make`.
+
+#### Patch 1 — pthread mutex and atomic reference counter declarations
+
+Adds `#include <pthread.h>` and `#include <stdatomic.h>` after the existing `pkcs11int.h` include. Adds two process-wide globals after the `pkcs11_handlers` declaration:
+
+```c
+static pthread_mutex_t pkcs11_cinit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int     pkcs11_module_refcount = 0;
+```
+
+`pkcs11_cinit_mutex` serialises all `C_Initialize` calls across worker threads. `pkcs11_module_refcount` tracks how many `Module` PHP objects are alive across all threads.
+
+#### Patch 2 — `CKF_OS_LOCKING_OK`
+
+Replaces the bare `C_Initialize(NULL)` call with one that passes `CK_C_INITIALIZE_ARGS` with `CKF_OS_LOCKING_OK` set. This tells the PKCS#11 library to use OS-level mutexes for all its internal state — required for any multi-threaded caller.
+
+```c
+CK_C_INITIALIZE_ARGS pkcs11_init_args = {NULL, NULL, NULL, NULL, CKF_OS_LOCKING_OK, NULL};
+rv = objval->functionList->C_Initialize(&pkcs11_init_args);
+```
+
+#### Patch 3 — `CKR_CRYPTOKI_ALREADY_INITIALIZED` tolerance
+
+Wraps the `C_Initialize` call in a `pthread_mutex_lock` / `pthread_mutex_unlock` pair and changes the error check to tolerate `CKR_CRYPTOKI_ALREADY_INITIALIZED`. Worker threads 2..N will receive this code from an already-initialised library; rather than treating it as a fatal error, execution continues. Each successful or tolerated initialisation increments `pkcs11_module_refcount` atomically.
+
+Combined Patch 2 & 3 result:
+
+```c
+pthread_mutex_lock(&pkcs11_cinit_mutex);
+CK_C_INITIALIZE_ARGS pkcs11_init_args = { ... CKF_OS_LOCKING_OK ... };
+rv = objval->functionList->C_Initialize(&pkcs11_init_args);
+if (rv != CKR_OK && rv != CKR_CRYPTOKI_ALREADY_INITIALIZED) {
+    pkcs11_error(rv, "Unable to initialise token");
+    pthread_mutex_unlock(&pkcs11_cinit_mutex);
+    return;
+}
+pthread_mutex_unlock(&pkcs11_cinit_mutex);
+atomic_fetch_add_explicit(&pkcs11_module_refcount, 1, memory_order_relaxed);
+```
+
+#### Patch 4 — Reference-counted `pkcs11_shutdown`
+
+Replaces the body of `pkcs11_shutdown()` with a reference-counted version. When any `Module` PHP object is freed, the refcount is decremented atomically. Only when the **last** `Module` across all worker threads is freed are `C_Finalize` and `dlclose` called. All earlier frees simply null out the object's pointers and return, leaving the library intact for the other threads.
+
+```c
+void pkcs11_shutdown(pkcs11_object *obj) {
+    if (atomic_fetch_sub_explicit(&pkcs11_module_refcount, 1, memory_order_acq_rel) > 1) {
+        obj->functionList = NULL;
+        obj->pkcs11module = NULL;
+        return;
+    }
+    if (obj->functionList != NULL) {
+        obj->functionList->C_Finalize(NULL_PTR);
+        obj->functionList = NULL;
+    }
+    if (obj->pkcs11module != NULL) {
+        dlclose(obj->pkcs11module);
+    }
+}
+```
+
+### Build-time verification
+
+After applying the patches the Dockerfile runs:
+
+```dockerfile
+grep -q 'pkcs11_cinit_mutex' /tmp/php-pkcs11/pkcs11module.c     || { echo "ERROR: pkcs11 ZTS patch was not applied"; exit 1; }
+```
+
+This ensures the build fails early if the patch script's string search fails to find the expected source patterns (e.g. if the upstream source changes between tag versions).
+
+### Upstream version lock
+
+The patches are applied against tag `v1.1.3` only. The Dockerfile clones with `--branch v1.1.3 --depth=1`. If `gamringer/php-pkcs11` is updated, the patch script must be re-validated against the new source before upgrading the tag.
+
 
 ---
 
@@ -932,9 +1213,9 @@ The compose file is intended for development. Two services:
 
 ### How communication works
 
-The PKCS#11 architecture is **in-process**: the vendor-supplied shared library (`.so`) is loaded directly into the PHP-FPM worker by the `gamringer/php-pkcs11` extension using `dlopen`. There is no separate daemon or sidecar for HSM communication — function calls like `C_Sign` and `C_Decrypt` are plain C function calls into the library, which then handles the actual transport to the HSM.
+The PKCS#11 architecture is **in-process**: the vendor-supplied shared library (`.so`) is loaded directly into the FrankenPHP worker by the `gamringer/php-pkcs11` extension using `dlopen`. There is no separate daemon or sidecar for HSM communication — function calls like `C_Sign` and `C_Decrypt` are plain C function calls into the library, which then handles the actual transport to the HSM.
 
-This means the shared library and any vendor-specific client software it depends on must be present inside the PHP-FPM container. The library is either baked into the Docker image (for well-known open-source modules like SoftHSM2) or mounted from the host (for proprietary vendor libraries). The private key material never crosses the container boundary — it stays inside the HSM.
+This means the shared library and any vendor-specific client software it depends on must be present inside the FrankenPHP container. The library is either baked into the Docker image (for well-known open-source modules like SoftHSM2) or mounted from the host (for proprietary vendor libraries). The private key material never crosses the container boundary — it stays inside the HSM.
 
 The transport between the library and the HSM depends on the physical form factor:
 
@@ -948,27 +1229,20 @@ The transport between the library and the HSM depends on the physical form facto
 ### Architecture diagram
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Docker host                                     │
-│                                                 │
-│  ┌──────────────┐    ┌──────────────────────┐   │
-│  │    Caddy     │    │   PHP-FPM (app)      │   │
-│  │  (TLS term.) │    │                      │   │
-│  │              │    │  PrivateKeyAgent     │   │
-│  │              │───▶│  Pkcs11Backend       │   │
-│  │              │    │       │              │   │
-│  └──────────────┘    │  PKCS#11 .so library │   │
-│                      │  (loaded in-process) │   │
-│                      │       │              │   │
-│                      └───────┼──────────────┘   │
-│                              │                  │
-│          ┌───────────────────┼──────────────┐   │
-│          │ Transport (host)  │              │   │
-│          │                   ▼              │   │
-│          │  USB device  / Unix socket /     │   │
-│          │  TCP to network or cloud HSM     │   │
-│          └──────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────┐
+│  FrankenPHP container (app)            │
+│                                        │
+│  ┌──────────┐   ┌──────────────────┐   │
+│  │  Caddy   │   │  PHP Workers×16  │   │
+│  │ (built-  │──▶│  (worker mode)   │   │
+│  │  in TLS) │   │                  │   │
+│  └──────────┘   │  PrivateKeyAgent │   │
+│                 │  Pkcs11Backend   │   │
+│                 │       │          │   │
+│                 │  PKCS#11 .so lib │   │
+│                 │  (in-process)    │   │
+│                 └──────┼───────────┘   │
+└────────────────────────┼───────────────┘
                               │
         ┌─────────────────────▼──────────────────────┐
         │                    HSM                     │
@@ -1066,7 +1340,7 @@ The PKCS#11 integration tests cover:
 
 | Dimension | Description | Why it matters |
 |---|---|---|
-| **Signing throughput** | Number of sign operations per second (sustained) | Determines PHP-FPM worker count and whether a single HSM is sufficient |
+| **Signing throughput** | Number of sign operations per second (sustained) | Determines FrankenPHP worker count and whether a single HSM is sufficient |
 | **Decryption throughput** | Number of decrypt operations per second (sustained) | As above; decrypt is typically more expensive than signing on HSMs |
 | **Peak load** | Maximum burst operations per second | Determines whether the FPM worker count and HSM session budget can absorb spikes |
 | **Latency (p95 / p99)** | Acceptable response time for a single sign or decrypt call | Affects HSM selection; network appliances add round-trip overhead versus local PCIe/USB |
@@ -1075,16 +1349,16 @@ The PKCS#11 integration tests cover:
 
 ### Architectural impact
 
-**PHP-FPM concurrency** (`pm.max_children` in `php-fpm.conf`)
+**FrankenPHP worker concurrency** (`worker` directive in `Caddyfile`)
 
-Each FPM worker holds one PKCS#11 session per configured PKCS#11 backend. The number of concurrent HSM operations the agent can perform equals `pm.max_children × number_of_pkcs11_backends`. Throughput and latency targets directly determine the required worker count. In a containerised deployment, horizontal scaling (multiple container replicas) multiplies this capacity at the cost of requiring more HSM sessions.
+Each worker thread holds one PKCS#11 session per configured PKCS#11 backend. The number of concurrent HSM operations the agent can perform equals `worker_count × number_of_pkcs11_backends`. Throughput and latency targets directly determine the required worker count. In a containerised deployment, horizontal scaling (multiple container replicas) multiplies this capacity at the cost of requiring more HSM sessions.
 
 **HSM session limits**
 
 Physical HSMs have a maximum number of concurrent sessions. For example, Thales Luna Network HSMs support hundreds to thousands of sessions depending on model and licence. YubiHSM 2 supports far fewer (around 16). If the worker count exceeds the HSM's session limit, sessions initialisation fails at boot. The session budget must be calculated as:
 
 ```
-sessions_required = replicas × pm.max_children × pkcs11_backends_per_worker
+sessions_required = replicas × worker_count × pkcs11_backends_per_worker
 ```
 
 **Round-trip latency**
@@ -1113,11 +1387,11 @@ If a failure persists and the backend reaches a hard error state, it returns a 5
 
 ### Estimated throughput
 
-The following estimates are calculated from the per-request processing chain, based on the architecture described above: Caddy (TLS termination) → PHP-FPM (Symfony) → backend (OpenSSL or PKCS#11). All numbers assume RSA-2048 keys unless stated otherwise. RSA-4096 operations are roughly 4–5× slower for private key operations due to the cubic relationship between key size and modular exponentiation cost.
+The following estimates are calculated from the per-request processing chain, based on the architecture described above: FrankenPHP (Caddy TLS termination + PHP worker) → backend (OpenSSL or PKCS#11). All numbers assume RSA-2048 keys unless stated otherwise. RSA-4096 operations are roughly 4–5× slower for private key operations due to the cubic relationship between key size and modular exponentiation cost.
 
 #### Calculation method
 
-Each request passes through a fixed set of processing stages. The total per-request latency is the sum of all stages. Because PHP-FPM workers are synchronous (one request at a time per worker), the per-worker throughput is simply $\frac{1000}{\text{latency in ms}}$ operations per second. Total agent throughput scales linearly with the number of FPM workers (up to the backend's concurrency limit).
+Each request passes through a fixed set of processing stages. The total per-request latency is the sum of all stages. Because FrankenPHP workers are synchronous (one request at a time per worker thread), the per-worker throughput is simply $\frac{1000}{\text{latency in ms}}$ operations per second. Total agent throughput scales linearly with the number of workers (up to the backend's concurrency limit).
 
 The estimates below are derived from published OpenSSL benchmarks (`openssl speed rsa2048` on modern x86-64 hardware), typical Symfony framework overhead for a minimal JSON API (no ORM, no template engine, opcache enabled), and documented HSM vendor specifications.
 
@@ -1127,22 +1401,21 @@ The estimates below are derived from published OpenSSL benchmarks (`openssl spee
 
 | Stage | Duration | Notes |
 |---|---|---|
-| Caddy TLS + FastCGI proxy | ~0.3 ms | TLS session reuse; FastCGI over Unix socket or TCP |
-| PHP-FPM request init | ~0.1 ms | Worker already running; no cold start |
+| FrankenPHP Caddy TLS + worker dispatch | ~0.2 ms | TLS session reuse; in-process dispatch (no FastCGI TCP hop) |
 | Symfony routing + security firewall | ~1.0 ms | TokenAuthenticator with `hash_equals()`, minimal firewall |
 | JSON deserialization + validation | ~0.2 ms | Small payload (~100 bytes), two constraint checks |
 | RSA private key operation | ~0.7 ms | `openssl_private_encrypt()` / `openssl_private_decrypt()`; includes DigestInfo construction for signing |
 | JSON serialization + response | ~0.1 ms | Single Base64 field |
-| **Total per request** | **~2.4 ms** | |
+| **Total per request** | **~2.2 ms** | |
 
-Per-worker throughput: $\frac{1000}{2.4} ≈ 400$ ops/sec
+Per-worker throughput: $\frac{1000}{2.2} ≈ 450$ ops/sec
 
 **PKCS#11 backend — network HSM (same datacenter, <1 ms network RTT)**
 
 | Stage | Duration | Notes |
 |---|---|---|
-| Caddy TLS + FastCGI proxy | ~0.3 ms | Same as OpenSSL |
-| PHP-FPM + Symfony overhead | ~1.3 ms | Same as OpenSSL |
+| FrankenPHP Caddy TLS + worker dispatch | ~0.2 ms | TLS session reuse; in-process dispatch (no FastCGI TCP hop) |
+| Symfony overhead | ~1.3 ms | Same as OpenSSL |
 | Network round-trip to HSM | ~0.5–2 ms | Depends on network topology; same-rack is fastest |
 | HSM RSA operation | ~0.5–1 ms | Enterprise HSMs (Thales Luna, Entrust nShield) at 2048-bit |
 | JSON serialization + response | ~0.1 ms | |
@@ -1154,7 +1427,7 @@ Per-worker throughput: $\frac{1000}{4} ≈ 250$ ops/sec (midpoint estimate)
 
 | Stage | Duration | Notes |
 |---|---|---|
-| Caddy TLS + FastCGI + Symfony | ~1.7 ms | Same as above |
+| FrankenPHP Caddy TLS + Symfony | ~1.6 ms | In-process dispatch saves ~0.1 ms vs FastCGI |
 | USB transport + HSM crypto | ~25–50 ms | YubiHSM 2 RSA-2048 private key: ~20–40 ops/sec per device |
 | **Total per request** | **~27–52 ms** | |
 
@@ -1164,9 +1437,9 @@ Per-worker throughput: $\frac{1000}{40} ≈ 25$ ops/sec (midpoint). The USB HSM 
 
 The table below shows estimated sustained throughput for common deployment configurations. The formula is:
 
-$$\text{throughput} = \text{replicas} \times \text{pm.max\_children} \times \text{per-worker ops/sec}$$
+$$\text{throughput} = \text{replicas} \times \text{worker\_count} \times \text{per-worker ops/sec}$$
 
-This holds as long as the backend can sustain the load. For HSM backends, the HSM's own rated throughput is the ceiling regardless of how many FPM workers are configured.
+This holds as long as the backend can sustain the load. For HSM backends, the HSM's own rated throughput is the ceiling regardless of how many FrankenPHP workers are configured.
 
 | Backend | Workers | Replicas | Per-worker ops/sec | Aggregate ops/sec | Limiting factor |
 |---|---|---|---|---|---|
@@ -1180,7 +1453,7 @@ This holds as long as the backend can sustain the load. For HSM backends, the HS
 
 #### Realistic CPU constraint for OpenSSL
 
-The per-worker throughput of ~400 ops/sec assumes the worker has a dedicated CPU core during its request. In practice, a container with 4 CPU cores running 10 FPM workers will see contention. As a rule of thumb, configure `pm.max_children` at 2× the available CPU cores for a CPU-bound workload like RSA signing. With 4 cores and 8 workers, expect ~3,200 ops/sec per replica — not the theoretical 8 × 400.
+The per-worker throughput of ~400 ops/sec assumes the worker has a dedicated CPU core during its request. In practice, a container with 4 CPU cores running 10 FrankenPHP workers will see contention. As a rule of thumb, configure `worker_count` at 2× the available CPU cores for a CPU-bound workload like RSA signing. With 4 cores and 8 workers, expect ~3,200 ops/sec per replica — not the theoretical 8 × 400.
 
 #### Signing versus decryption
 
@@ -1192,7 +1465,7 @@ For HSM backends, signing and decryption throughput differences depend on the HS
 
 - Client-side latency (network round-trip from the consuming service to Caddy).
 - TLS handshake time for new connections (amortised over keep-alive connections; first request adds ~1–3 ms for TLS 1.3).
-- Queue wait time when all FPM workers are busy (depends on load and arrival pattern).
+- Queue wait time when all FrankenPHP workers are busy (depends on load and arrival pattern).
 - PHP garbage collection pauses (negligible for this workload; no large object graphs).
 
 These estimates provide a baseline for capacity planning. It should be validated against the actual (deployment) environment with a load test.

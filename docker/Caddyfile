@@ -1,18 +1,24 @@
+{
+    frankenphp {
+        worker /app/public/worker.php 6
+    }
+}
+
 localhost {
-    # TLS configuration — use internal CA for dev, provide certs for production
     tls internal
 
-    # Reverse proxy to PHP-FPM (Symfony front-controller: all requests → index.php)
-    # Using explicit fastcgi transport avoids Caddy needing /app/public on its own filesystem
-    reverse_proxy app:9000 {
-        transport fastcgi {
-            root /app/public
-            split .php
-            env SCRIPT_FILENAME /app/public/index.php
-        }
-    }
+    root * /app/public
 
-    # Security headers
+    # php_server's built-in try_files falls back to /index.php; FrankenPHP
+    # then finds no worker registered for index.php and falls back to the
+    # non-persistent thread 0. Rewriting non-file requests to /worker.php
+    # BEFORE php_server runs ensures the resolved script matches the
+    # registered worker, so FrankenPHP dispatches to a persistent thread.
+    @toWorker not file
+    rewrite @toWorker /worker.php
+
+    php_server
+
     header {
         -Server
         X-Content-Type-Options nosniff
