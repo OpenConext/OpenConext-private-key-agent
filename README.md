@@ -18,7 +18,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 | Operation | Client sends | Agent returns |
 |---|---|---|
 | `POST /sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
-| `POST /decrypt/{key_name}` | Base64-encoded ciphertext + algorithm | Base64-encoded plaintext (symmetric key) |
+| `POST /decrypt/{key_name}` | Base64-encoded ciphertext + algorithm (+ optional OAEP label) | Base64-encoded plaintext (symmetric key) |
 | `GET /health` | — | Backend health status |
 
 **The private key never leaves the agent.** Only cryptographic inputs and outputs cross the network boundary.
@@ -56,7 +56,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 | Framework | Symfony 7.4 |
 | PKCS#11 bridge | `gamringer/php-pkcs11` |
 | Logging | Monolog → JSON → stdout |
-| HTTP server | PHP-FPM + Caddy (TLS) |
+| HTTP server | FrankenPHP (Caddy + PHP, ZTS worker mode) |
 | Deployment | Docker Compose |
 
 > **PHP 8.5 is a hard requirement.** PHP 8.5 adds the `digest_algo` parameter to `openssl_private_decrypt()`, which is the only way to select non-SHA-1 OAEP hash algorithms. Earlier PHP versions cannot implement `rsa-pkcs1-oaep-mgf1-sha256/384/512` via OpenSSL.
@@ -79,7 +79,7 @@ cd openconext-private-key-agent
 docker compose up -d
 ```
 
-This builds the `dev` Docker image (PHP-FPM + SoftHSM2) and starts the Caddy TLS proxy.
+This builds the `dev` Docker image (FrankenPHP + SoftHSM2) and starts the FrankenPHP server.
 
 ### 2 — Provision the development environment
 
