@@ -1,18 +1,14 @@
 FROM dunglas/frankenphp:1-php8.5-bookworm AS base
 
-# Patch script for php-pkcs11: see docker/pkcs11-zts-patch.pl for full explanation.
-COPY docker/pkcs11-zts-patch.pl /tmp/pkcs11-zts-patch.pl
-
-# Build gamringer/php-pkcs11 from source with thread-safety patches for FrankenPHP
-# ZTS worker mode.  See docker/pkcs11-zts-patch.pl for a full explanation of each patch.
+# Build mroest/php-pkcs11 from source; the feature/php-zts branch includes
+# native ZTS support for FrankenPHP worker mode so no patching is needed.
+# Use "make -f Makefile" to avoid the GNUmakefile in the repo root (which
+# defines a docker-build target unrelated to the PHP extension build).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends $PHPIZE_DEPS git \
-    && git clone --depth=1 --branch v1.1.3 \
-        https://github.com/gamringer/php-pkcs11 /tmp/php-pkcs11 \
-    && perl /tmp/pkcs11-zts-patch.pl /tmp/php-pkcs11/pkcs11module.c \
-    && grep -q 'pkcs11_cinit_mutex' /tmp/php-pkcs11/pkcs11module.c \
-        || { echo "ERROR: pkcs11 ZTS patch was not applied"; exit 1; } \
-    && cd /tmp/php-pkcs11 && phpize && ./configure && make && make install \
+    && git clone --depth=1 --branch feature/php-zts \
+    https://github.com/mroest/php-pkcs11 /tmp/php-pkcs11 \
+    && cd /tmp/php-pkcs11 && phpize && ./configure && make -f Makefile && make -f Makefile install \
     && docker-php-ext-enable pkcs11 \
     && rm -rf /tmp/php-pkcs11 \
     && apt-get purge -y $PHPIZE_DEPS git \
@@ -54,14 +50,14 @@ ENV SOFTHSM2_CONF=/etc/softhsm2.conf
 # the PKCS#11 integration tests run (not just skip).
 RUN mkdir -p /var/lib/softhsm/tokens \
     && printf 'directories.tokendir = /var/lib/softhsm/tokens\nobjectstore.backend = file\nlog.level = ERROR\n' \
-        > /etc/softhsm2.conf \
+    > /etc/softhsm2.conf \
     && softhsm2-util --init-token --slot 0 \
-        --label "test-token" --pin 1234 --so-pin 5678 \
+    --label "test-token" --pin 1234 --so-pin 5678 \
     && pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
-        --login --pin 1234 \
-        --slot-index 0 \
-        --keypairgen --key-type rsa:2048 \
-        --label "test-signing-key" --id 01 \
+    --login --pin 1234 \
+    --slot-index 0 \
+    --keypairgen --key-type rsa:2048 \
+    --label "test-signing-key" --id 01 \
     && chown -R www-data:www-data /var/lib/softhsm
 
 RUN composer install --no-scripts --no-autoloader --prefer-dist \
