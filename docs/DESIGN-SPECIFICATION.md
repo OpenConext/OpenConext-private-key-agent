@@ -427,7 +427,7 @@ Each entry in `keys` defines a logical key identity that clients can reference. 
 |---|---|
 | `bin/` | Symfony console entry point (`bin/console`) |
 | `config/` | Symfony configuration: routing, service wiring, and package configs (monolog, nelmio, security) |
-| `docker/` | Docker build artefacts: multi-stage `Dockerfile`, embedded `Caddyfile`, PHP ini files, and the ZTS patch script for `php-pkcs11` |
+| `docker/` | Docker build artefacts: multi-stage `Dockerfile`, embedded `Caddyfile`, and PHP ini files |
 | `public/` | Web root: `index.php` (direct entry point) and `worker.php` (FrankenPHP worker-loop entry point) |
 | `src/Backend/` | Cryptographic backend implementations (OpenSSL and PKCS#11), backend factory, backend interfaces, and per-worker PKCS#11 caching utilities (`Pkcs11ModuleCache`, `Pkcs11SessionCache`, `Pkcs11SessionManager`) |
 | `src/Command/` | Symfony console commands; currently `ValidateConfigCommand` for offline configuration validation |
@@ -770,7 +770,7 @@ classDiagram
 
 Per-worker cache of `\Pkcs11\Module` instances, keyed by library path. In FrankenPHP worker mode, a static property on a class persists for the lifetime of the worker thread (not just the request). `Pkcs11ModuleCache` uses a static array to ensure each `.so` library is loaded and `C_Initialize`-d exactly once per worker thread. Subsequent PKCS#11 backends that reference the same library path share the already-initialised `Module` object.
 
-Without this cache, each new `Pkcs11\Module($lib)` construction would call `C_Initialize` again. With the ZTS-patched extension this is tolerated (the patch makes the second call return `CKR_CRYPTOKI_ALREADY_INITIALIZED` and continue), but it would still create unnecessary duplicate module objects.
+Without this cache, each new `Pkcs11\Module($lib)` construction would call `C_Initialize` again. The `feature/php-zts` branch tolerates this (it returns `CKR_CRYPTOKI_ALREADY_INITIALIZED` and continues), but it would still create unnecessary duplicate module objects.
 
 ### `Pkcs11SessionCache`
 
@@ -987,7 +987,7 @@ The `gamringer/php-pkcs11` extension is installed as a system package in the Doc
 
 Three stages:
 
-- **`base`**: `dunglas/frankenphp:1-php8.5-bookworm` (Debian 12, PHP 8.5 ZTS with embedded Caddy). The `gamringer/php-pkcs11` extension is built from source (tag `v1.1.3`) because the upstream package does not support PHP ZTS out of the box. A Perl patch script (`docker/pkcs11-zts-patch.pl`) modifies `pkcs11module.c` before compilation; see the [ZTS patch section](#zts-patches-for-gamringerphp-pkcs11) below for details. Composer binary is copied in.
+- **`base`**: `dunglas/frankenphp:1-php8.5-bookworm` (Debian 12, PHP 8.5 ZTS with embedded Caddy). The `php-pkcs11` extension is built from source using the [`feature/php-zts` branch of `mroest/php-pkcs11`](https://github.com/mroest/php-pkcs11/tree/feature/php-zts), which ships native ZTS support for FrankenPHP worker mode. Composer binary is copied in.
 - **`prod`**: Extends `base` with production Composer dependencies, optimised autoloader, PHP OPcache settings from `docker/app.ini`, and a pre-warmed Symfony cache (`APP_DEBUG=0`). Runs as root (required to bind port 443); `opcache.preload_user = www-data` in `app.ini` drops privileges for the preload phase.
 - **`dev`**: Extends `prod` with `softhsm2` and `opensc` installed from the Debian package repository. An RSA-2048 test key pair is pre-generated in the image so that the PKCS#11 integration tests can run without any host-side HSM.
 
@@ -1116,96 +1116,15 @@ The worker count is set in the `Caddyfile` (currently 16). This must not exceed 
 
 ---
 
-## ZTS Patches for `gamringer/php-pkcs11`
+## PHP PKCS#11 Extension — ZTS Support
 
-### Why patches are needed
+The `php-pkcs11` extension is built from the [`feature/php-zts` branch of `mroest/php-pkcs11`](https://github.com/mroest/php-pkcs11/tree/feature/php-zts). This branch adds native ZTS (Zend Thread Safety) support for FrankenPHP worker mode, addressing the three thread-safety issues present in the original `gamringer/php-pkcs11` upstream:
 
-FrankenPHP runs PHP in ZTS (thread-safe) mode with multiple worker threads inside one process. The upstream `gamringer/php-pkcs11` extension (tag `v1.1.3`) was written for a single-threaded PHP SAPI (PHP-FPM NTS). It has three thread-safety bugs that cause crashes or undefined behaviour under FrankenPHP ZTS:
+1. **Serialised `C_Initialize`** — a `pthread_mutex_t` guards concurrent initialisation across worker threads.
+2. **`CKR_CRYPTOKI_ALREADY_INITIALIZED` tolerance** — subsequent worker threads receive this code from an already-initialised library and continue rather than aborting.
+3. **Reference-counted `C_Finalize` / `dlclose`** — the library is only torn down when the last `Module` object across all worker threads is freed.
 
-1. **No serialisation of `C_Initialize`.** Multiple worker threads each construct a `new Module()` on startup. Without a mutex, two threads can call `C_Initialize` concurrently, which is undefined behaviour according to the PKCS#11 spec.
-
-2. **`C_Initialize` called more than once is treated as a fatal error.** The second thread to call `C_Initialize` (even sequentially) receives `CKR_CRYPTOKI_ALREADY_INITIALIZED` (0x91) and the original code treats this as an unrecoverable error.
-
-3. **`C_Finalize` and `dlclose` are process-global operations called per-object.** When a worker thread is recycled (its `Module` PHP object is garbage-collected), `C_Finalize(NULL)` tears down the PKCS#11 library for the entire process while other threads are still mid-operation, causing `SIGSEGV`.
-
-### Patch script: `docker/pkcs11-zts-patch.pl`
-
-The Perl script `docker/pkcs11-zts-patch.pl` applies four targeted source patches to `pkcs11module.c` during the Docker build, before `phpize && ./configure && make`.
-
-#### Patch 1 — pthread mutex and atomic reference counter declarations
-
-Adds `#include <pthread.h>` and `#include <stdatomic.h>` after the existing `pkcs11int.h` include. Adds two process-wide globals after the `pkcs11_handlers` declaration:
-
-```c
-static pthread_mutex_t pkcs11_cinit_mutex = PTHREAD_MUTEX_INITIALIZER;
-static _Atomic int     pkcs11_module_refcount = 0;
-```
-
-`pkcs11_cinit_mutex` serialises all `C_Initialize` calls across worker threads. `pkcs11_module_refcount` tracks how many `Module` PHP objects are alive across all threads.
-
-#### Patch 2 — `CKF_OS_LOCKING_OK`
-
-Replaces the bare `C_Initialize(NULL)` call with one that passes `CK_C_INITIALIZE_ARGS` with `CKF_OS_LOCKING_OK` set. This tells the PKCS#11 library to use OS-level mutexes for all its internal state — required for any multi-threaded caller.
-
-```c
-CK_C_INITIALIZE_ARGS pkcs11_init_args = {NULL, NULL, NULL, NULL, CKF_OS_LOCKING_OK, NULL};
-rv = objval->functionList->C_Initialize(&pkcs11_init_args);
-```
-
-#### Patch 3 — `CKR_CRYPTOKI_ALREADY_INITIALIZED` tolerance
-
-Wraps the `C_Initialize` call in a `pthread_mutex_lock` / `pthread_mutex_unlock` pair and changes the error check to tolerate `CKR_CRYPTOKI_ALREADY_INITIALIZED`. Worker threads 2..N will receive this code from an already-initialised library; rather than treating it as a fatal error, execution continues. Each successful or tolerated initialisation increments `pkcs11_module_refcount` atomically.
-
-Combined Patch 2 & 3 result:
-
-```c
-pthread_mutex_lock(&pkcs11_cinit_mutex);
-CK_C_INITIALIZE_ARGS pkcs11_init_args = { ... CKF_OS_LOCKING_OK ... };
-rv = objval->functionList->C_Initialize(&pkcs11_init_args);
-if (rv != CKR_OK && rv != CKR_CRYPTOKI_ALREADY_INITIALIZED) {
-    pkcs11_error(rv, "Unable to initialise token");
-    pthread_mutex_unlock(&pkcs11_cinit_mutex);
-    return;
-}
-pthread_mutex_unlock(&pkcs11_cinit_mutex);
-atomic_fetch_add_explicit(&pkcs11_module_refcount, 1, memory_order_relaxed);
-```
-
-#### Patch 4 — Reference-counted `pkcs11_shutdown`
-
-Replaces the body of `pkcs11_shutdown()` with a reference-counted version. When any `Module` PHP object is freed, the refcount is decremented atomically. Only when the **last** `Module` across all worker threads is freed are `C_Finalize` and `dlclose` called. All earlier frees simply null out the object's pointers and return, leaving the library intact for the other threads.
-
-```c
-void pkcs11_shutdown(pkcs11_object *obj) {
-    if (atomic_fetch_sub_explicit(&pkcs11_module_refcount, 1, memory_order_acq_rel) > 1) {
-        obj->functionList = NULL;
-        obj->pkcs11module = NULL;
-        return;
-    }
-    if (obj->functionList != NULL) {
-        obj->functionList->C_Finalize(NULL_PTR);
-        obj->functionList = NULL;
-    }
-    if (obj->pkcs11module != NULL) {
-        dlclose(obj->pkcs11module);
-    }
-}
-```
-
-### Build-time verification
-
-After applying the patches the Dockerfile runs:
-
-```dockerfile
-grep -q 'pkcs11_cinit_mutex' /tmp/php-pkcs11/pkcs11module.c     || { echo "ERROR: pkcs11 ZTS patch was not applied"; exit 1; }
-```
-
-This ensures the build fails early if the patch script's string search fails to find the expected source patterns (e.g. if the upstream source changes between tag versions).
-
-### Upstream version lock
-
-The patches are applied against tag `v1.1.3` only. The Dockerfile clones with `--branch v1.1.3 --depth=1`. If `gamringer/php-pkcs11` is updated, the patch script must be re-validated against the new source before upgrading the tag.
-
+The Dockerfile clones with `--branch feature/php-zts --depth=1` and builds directly.
 
 ---
 

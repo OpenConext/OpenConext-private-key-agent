@@ -2,8 +2,8 @@
 
 A REST API service that performs RSA signing and decryption operations using protected private keys — without ever exposing the keys to callers. The agent runs in a separate process and user context, optionally on a separate host, from the services that consume it.
 
-> **Design specifications:** See [DESIGN-SPECIFICATION.md](DESIGN-SPECIFICATION.md) for the full architecture, API contract, configuration reference, and implementation details.  
-> **Initial draft:** The original problem statement and rationale are in [DRAFT-SPEC.md](DRAFT-SPEC.md).
+> **Design specifications:** See [DESIGN-SPECIFICATION.md](docs/DESIGN-SPECIFICATION.md) for the full architecture, API contract, configuration reference, and implementation details.  
+> **Initial draft:** The original problem statement and rationale are in [DRAFT-SPEC.md](docs/DRAFT-SPEC.md).
 
 ---
 
@@ -433,7 +433,7 @@ clients:
       - saml-key
 ```
 
-For the full configuration reference (all fields, validation rules, secrets handling) see [DESIGN-SPECIFICATION.md — Configuration](DESIGN-SPECIFICATION.md#configuration).
+For the full configuration reference (all fields, validation rules, secrets handling) see [DESIGN-SPECIFICATION.md — Configuration](docs/DESIGN-SPECIFICATION.md#configuration).
 
 ### Validate a config file without starting the server
 
@@ -498,7 +498,7 @@ class PrivateKeyAgentSignatureBackend implements SignatureBackend
 }
 ```
 
-For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.md — SimpleSAML integration](DESIGN-SPECIFICATION.md#simplesam-integration).
+For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.md — SimpleSAML integration](docs/DESIGN-SPECIFICATION.md#simplesam-integration).
 
 ---
 
