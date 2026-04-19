@@ -140,8 +140,14 @@ final class Pkcs11DecryptionBackend implements DecryptionBackendInterface
 
         try {
             $mechanism = $this->buildMechanism($mechanismType, $algorithm, $label);
+            $t0        = hrtime(true);
+            $plaintext = $privateKey->decrypt($mechanism, $ciphertext);
+            $this->logger->debug('PKCS#11 decrypt completed', [
+                'backend'    => $this->config->name,
+                'durationMs' => (int) ((hrtime(true) - $t0) / 1_000_000),
+            ]);
 
-            return $privateKey->decrypt($mechanism, $ciphertext);
+            return $plaintext;
         } catch (Exception $e) {
             if ($this->sessionManager->isSessionError($e)) {
                 $this->logger->warning(

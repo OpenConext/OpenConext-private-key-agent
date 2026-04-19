@@ -78,8 +78,14 @@ final class Pkcs11SigningBackend implements SigningBackendInterface
 
         try {
             $mechanism = new Mechanism(CKM_RSA_PKCS);
+            $t0        = hrtime(true);
+            $signature = $privateKey->sign($mechanism, $digestInfo);
+            $this->logger->debug('PKCS#11 sign completed', [
+                'backend'    => $this->config->name,
+                'durationMs' => (int) ((hrtime(true) - $t0) / 1_000_000),
+            ]);
 
-            return $privateKey->sign($mechanism, $digestInfo);
+            return $signature;
         } catch (Exception $e) {
             if ($this->sessionManager->isSessionError($e)) {
                 $this->logger->warning(
