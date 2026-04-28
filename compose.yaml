@@ -4,11 +4,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: dev
+    env_file: .env
     volumes:
-      - .:/app
+      - .:/var/www/html
       - ./config/private-key-agent.yaml:/etc/private-key-agent/config.yaml:ro
-      - ./docker/app.dev.ini:/usr/local/etc/php/conf.d/app.ini:ro
-      - ./docker/Caddyfile:/etc/frankenphp/Caddyfile:ro
+      - ./docker/app.dev.ini:/usr/local/etc/php/conf.d/zz-app-local.ini:ro
     ports:
-      - "443:443"
+      - "80:80"
     restart: unless-stopped

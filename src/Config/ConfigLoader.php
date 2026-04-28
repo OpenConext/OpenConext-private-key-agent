@@ -10,7 +10,6 @@ use Symfony\Component\Yaml\Yaml;
 use function array_values;
 use function count;
 use function file_exists;
-use function in_array;
 use function is_array;
 use function is_string;
 use function sprintf;
@@ -68,45 +67,18 @@ final class ConfigLoader
             $name = $group['name'] ?? throw new InvalidConfigurationException('Backend group must have a name');
             $type = $group['type'] ?? throw new InvalidConfigurationException(sprintf('Backend group "%s" must have a type', $name));
 
-            if (! in_array($type, ['openssl', 'pkcs11'], true)) {
+            if ($type !== 'openssl') {
                 throw new InvalidConfigurationException(sprintf('Backend group "%s" has invalid type "%s"', $name, $type));
             }
 
-            if ($type === 'openssl' && empty($group['key_path'])) {
+            if (empty($group['key_path'])) {
                 throw new InvalidConfigurationException(sprintf('OpenSSL backend group "%s" must have key_path', $name));
-            }
-
-            if ($type === 'pkcs11') {
-                if (empty($group['pkcs11_lib'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_lib', $name));
-                }
-
-                if (! isset($group['pkcs11_slot'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_slot', $name));
-                }
-
-                if (empty($group['pkcs11_key_label']) && empty($group['pkcs11_key_id'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_key_label or pkcs11_key_id', $name));
-                }
-            }
-
-            $environment = [];
-            if (isset($group['environment']) && is_array($group['environment'])) {
-                foreach ($group['environment'] as $envKey => $envValue) {
-                    $environment[(string) $envKey] = (string) $envValue;
-                }
             }
 
             $backends[$name] = new BackendGroupConfig(
                 name: $name,
                 type: $type,
-                keyPath: $group['key_path'] ?? null,
-                pkcs11Lib: $group['pkcs11_lib'] ?? null,
-                pkcs11Slot: isset($group['pkcs11_slot']) ? (int) $group['pkcs11_slot'] : null,
-                pkcs11Pin: $group['pkcs11_pin'] ?? null,
-                pkcs11KeyLabel: $group['pkcs11_key_label'] ?? null,
-                pkcs11KeyId: $group['pkcs11_key_id'] ?? null,
-                environment: $environment,
+                keyPath: $group['key_path'],
             );
         }
 

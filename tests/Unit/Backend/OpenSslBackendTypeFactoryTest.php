@@ -49,7 +49,6 @@ class OpenSslBackendTypeFactoryTest extends TestCase
     public function testDoesNotSupportOtherTypes(): void
     {
         $factory = new OpenSslBackendTypeFactory();
-        $this->assertFalse($factory->supports('pkcs11'));
         $this->assertFalse($factory->supports('unknown'));
     }
 

@@ -13,7 +13,6 @@ interface BackendInterface
 
     /**
      * Returns true if the backend can perform operations.
-     * For OpenSSL: always true. For PKCS#11: checks session via C_GetSessionInfo.
      */
     public function isHealthy(): bool;
 

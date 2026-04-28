@@ -6,7 +6,6 @@ namespace App\Tests\Unit\Service;
 
 use App\Backend\BackendFactory;
 use App\Backend\OpenSslBackendTypeFactory;
-use App\Backend\Pkcs11BackendTypeFactory;
 use App\Config\AgentConfig;
 use App\Config\BackendGroupConfig;
 use App\Config\ClientConfig;
@@ -57,7 +56,7 @@ class KeyRegistryBootstrapperTest extends TestCase
             clients: [$clientConfig],
         );
 
-        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory(new NullLogger())]), new NullLogger());
+        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory()]), new NullLogger());
         $registry     = $bootstrapper->createRegistry($agentConfig);
 
         $this->assertContains('my-key', $registry->getSigningKeyNames());
@@ -75,7 +74,7 @@ class KeyRegistryBootstrapperTest extends TestCase
             clients: [$clientConfig],
         );
 
-        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory(), new Pkcs11BackendTypeFactory(new NullLogger())]), new NullLogger());
+        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory()]), new NullLogger());
         $registry     = $bootstrapper->createRegistry($agentConfig);
 
         $this->assertContains('decrypt-key', $registry->getDecryptionKeyNames());

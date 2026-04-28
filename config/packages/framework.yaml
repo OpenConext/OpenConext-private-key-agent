@@ -1,6 +1,10 @@
 framework:
     secret: '%env(APP_SECRET)%'
     handle_all_throwables: true
+    http_method_override: false
+    session: false
+    router:
+        utf8: true
     php_errors:
         log: true
     serializer:

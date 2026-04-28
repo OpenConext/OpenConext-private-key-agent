@@ -16,7 +16,7 @@
 # Usage:
 #   ./tools/comprehensive-perf-test.sh
 #   ./tools/comprehensive-perf-test.sh -v          # verbose: show raw hey output
-#   BASE_URL=https://agent.example.com ./tools/comprehensive-perf-test.sh
+#   BASE_URL=http://agent.example.com ./tools/comprehensive-perf-test.sh
 #
 # Requires: hey, curl, openssl, docker
 
@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/config/private-key-agent.yaml"
 COMPOSE_FILE="$PROJECT_ROOT/compose.yaml"
-BASE_URL="${BASE_URL:-https://localhost}"
+BASE_URL="${BASE_URL:-http://localhost}"
 VERBOSE=false
 
 while [[ $# -gt 0 ]]; do
@@ -81,40 +81,6 @@ prepare_openssl_ciphertext() {
     fi
     $ok && base64 < "$tmp_enc"
     rm -f "$tmp_pub" "$tmp_enc"
-    $ok
-}
-
-prepare_hsm_ciphertext() {
-    local tmp_der; tmp_der=$(mktemp /tmp/pka-XXXXXX.der)
-    local tmp_pub; tmp_pub=$(mktemp /tmp/pka-XXXXXX.pem)
-    local tmp_enc; tmp_enc=$(mktemp /tmp/pka-XXXXXX)
-    local plaintext="dev-session-key-12345678"
-    local ok=true
-
-    docker compose -f "$COMPOSE_FILE" exec -T app sh -c "
-        pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
-            --login --pin 1234 --read-object --type pubkey \
-            --label test-signing-key --output-file /tmp/hsm-pubkey.der 2>/dev/null
-        cat /tmp/hsm-pubkey.der
-    " > "$tmp_der" 2>/dev/null || ok=false
-
-    if $ok; then
-        openssl pkey -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || openssl rsa -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || ok=false
-    fi
-
-    if $ok && [[ -s "$tmp_pub" ]]; then
-        printf '%s' "$plaintext" | openssl pkeyutl -encrypt \
-            -pubin -inkey "$tmp_pub" -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha1 -pkeyopt rsa_mgf1_md:sha1 \
-            -out "$tmp_enc" 2>/dev/null || ok=false
-    else
-        ok=false
-    fi
-
-    $ok && base64 < "$tmp_enc"
-    rm -f "$tmp_der" "$tmp_pub" "$tmp_enc"
     $ok
 }
 
@@ -184,12 +150,6 @@ run_phase() {
         "$concurrency" "$duration" \
         -d "$SIGN_BODY" || warn "sign/dev-signing-key phase had errors"
 
-    # --- Sign SoftHSM ---
-    run_bench "$phase_label" "sign/hsm-key" \
-        "${BASE_URL}/sign/hsm-key" \
-        "$concurrency" "$duration" \
-        -d "$SIGN_BODY" || warn "sign/hsm-key phase had errors"
-
     # --- Decrypt OpenSSL ---
     if [[ -n "${OPENSSL_DECRYPT_BODY:-}" ]]; then
         run_bench "$phase_label" "decrypt/dev-decryption-key" \
@@ -199,16 +159,6 @@ run_phase() {
     else
         warn "decrypt/dev-decryption-key skipped (ciphertext not available)"
     fi
-
-    # --- Decrypt SoftHSM ---
-    if [[ -n "${HSM_DECRYPT_BODY:-}" ]]; then
-        run_bench "$phase_label" "decrypt/hsm-key" \
-            "${BASE_URL}/decrypt/hsm-key" \
-            "$concurrency" "$duration" \
-            -d "$HSM_DECRYPT_BODY" || warn "decrypt/hsm-key phase had errors"
-    else
-        warn "decrypt/hsm-key skipped (ciphertext not available)"
-    fi
 }
 
 # ── Prepare payloads ──────────────────────────────────────────────────────────
@@ -216,7 +166,6 @@ run_phase() {
 hdr "Preparing test payloads"
 
 OPENSSL_DECRYPT_BODY=""
-HSM_DECRYPT_BODY=""
 
 OPENSSL_DEC_PEM="$PROJECT_ROOT/config/keys/dev-decryption.pem"
 if [[ -f "$OPENSSL_DEC_PEM" ]]; then
@@ -230,13 +179,6 @@ else
     warn "dev-decryption.pem not found — decrypt/dev-decryption-key will be skipped"
 fi
 
-if CT=$(prepare_hsm_ciphertext 2>/dev/null); then
-    HSM_DECRYPT_BODY="{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha1\",\"encrypted_data\":\"$CT\"}"
-    ok "SoftHSM ciphertext prepared"
-else
-    warn "Could not prepare HSM ciphertext — decrypt/hsm-key will be skipped"
-fi
-
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 
 hdr "Sanity checks"
@@ -244,7 +186,7 @@ hdr "Sanity checks"
 HASH=$(printf '%s' 'perf-test-payload' | openssl dgst -sha256 -binary | base64)
 SIGN_BODY="{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}"
 
-for ep in sign/dev-signing-key sign/hsm-key; do
+for ep in sign/dev-signing-key; do
     status=$(curl -sk -X POST -H "Authorization: Bearer $BEARER_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$SIGN_BODY" -o /dev/null -w "%{http_code}" "${BASE_URL}/$ep")
@@ -345,14 +287,12 @@ SESSION_REUSED=$(grep -c '"Reusing existing PKCS#11 session"' "$LOG_FILE" 2>/dev
 WORKER_STARTS=$(grep -c '"Worker started"' "$LOG_FILE" 2>/dev/null || echo 0)
 WORKER_RECYCLES=$(grep -c '"Worker recycling"' "$LOG_FILE" 2>/dev/null || echo 0)
 
-# Count sign/decrypt operations
-SIGN_OPS=$(grep -c '"PKCS#11 sign completed"' "$LOG_FILE" 2>/dev/null || echo 0)
-DECRYPT_OPS=$(grep -c '"PKCS#11 decrypt completed"' "$LOG_FILE" 2>/dev/null || echo 0)
+# Count sign operations
+SIGN_OPS=$(grep -c '"sign completed"' "$LOG_FILE" 2>/dev/null || echo 0)
 
 # Segfault / fatal error detection
 SEGFAULTS=$(grep -ciE 'segfault|sigsegv|signal 11|fatal error' "$LOG_FILE" 2>/dev/null || echo 0)
-PKCS11_ERRORS=$(grep -c '"PKCS#11.*error' "$LOG_FILE" 2>/dev/null || echo 0)
-SESSION_ERRORS=$(grep -c '"PKCS#11 session error' "$LOG_FILE" 2>/dev/null || echo 0)
+SESSION_ERRORS=$(grep -c '"session error' "$LOG_FILE" 2>/dev/null || echo 0)
 
 # Compute session reuse rate
 TOTAL_SESSION_OPS=$((SESSION_NEW + SESSION_REUSED))
@@ -364,12 +304,8 @@ fi
 
 # Sign operation timing (from debug logs) — extract durationMs values
 SIGN_TIMING_FILE="$RESULTS_DIR/sign-timing.txt"
-grep '"PKCS#11 sign completed"' "$LOG_FILE" 2>/dev/null \
+grep '"sign completed"' "$LOG_FILE" 2>/dev/null \
     | grep -o '"durationMs":[0-9]*' | cut -d: -f2 > "$SIGN_TIMING_FILE" || true
-
-DECRYPT_TIMING_FILE="$RESULTS_DIR/decrypt-timing.txt"
-grep '"PKCS#11 decrypt completed"' "$LOG_FILE" 2>/dev/null \
-    | grep -o '"durationMs":[0-9]*' | cut -d: -f2 > "$DECRYPT_TIMING_FILE" || true
 
 compute_stats() {
     local file="$1"
@@ -388,7 +324,6 @@ compute_stats() {
 }
 
 SIGN_TIMING_SUMMARY=$(compute_stats "$SIGN_TIMING_FILE")
-DECRYPT_TIMING_SUMMARY=$(compute_stats "$DECRYPT_TIMING_FILE")
 
 # Memory stats from docker stats CSV
 MEM_FILE="$RESULTS_DIR/mem-parsed.txt"
@@ -453,20 +388,18 @@ log "  OOM killed            : $OOM_KILLED"
 log "  Last exit code        : $EXIT_CODE"
 log "  Segfaults detected    : $SEGFAULTS"
 log "  Session errors        : $SESSION_ERRORS"
-log "  PKCS#11 error logs    : $PKCS11_ERRORS"
 log ""
 
 log "  ${BOLD}Session Reuse${NC}"
-log "  New PKCS#11 sessions  : $SESSION_NEW"
+log "  New sessions          : $SESSION_NEW"
 log "  Sessions reused       : $SESSION_REUSED"
 log "  Session reuse rate    : $REUSE_RATE"
 log "  Worker starts         : $WORKER_STARTS"
 log "  Worker recycles       : $WORKER_RECYCLES"
 log ""
 
-log "  ${BOLD}PKCS#11 Operation Timing (SoftHSM, from debug logs)${NC}"
+log "  ${BOLD}Operation Timing (from debug logs)${NC}"
 log "  Sign   : $SIGN_TIMING_SUMMARY"
-log "  Decrypt: $DECRYPT_TIMING_SUMMARY"
 log ""
 
 log "  ${BOLD}Container Memory (Docker stats, 10s samples)${NC}"
@@ -488,7 +421,7 @@ while IFS='|' read -r line; do
     while IFS='=' read -r k v; do F["$k"]="$v"; done < <(tr '|' '\n' <<< "$line")
     printf "  %-22s %-12s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
         "${F[PHASE]}/${F[LABEL]#*/}" \
-        "$(echo "${F[LABEL]}" | grep -o 'hsm-key\|dev-signing\|dev-decrypt\|openssl' || echo '-')" \
+        "$(echo "${F[LABEL]}" | grep -o 'dev-signing\|dev-decrypt\|openssl' || echo '-')" \
         "${F[REQS_S]}" "${F[AVG]}" "${F[P50]}" "${F[P95]}" "${F[P99]}" "${F[SLOWEST]}" \
         "${F[HTTP200]}"
 done < "$BENCH_FILE" 2>/dev/null || true

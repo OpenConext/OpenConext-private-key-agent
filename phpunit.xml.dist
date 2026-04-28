@@ -21,6 +21,18 @@
         <env name="APP_ENV" value="test"/>
         <env name="APP_SECRET" value="test-secret-not-for-production"/>
         <env name="KERNEL_CLASS" value="App\Kernel"/>
+
+        <!-- ###+ symfony/framework-bundle ### -->
+        <env name="APP_ENV" value="dev"/>
+        <env name="APP_SECRET" value=""/>
+        <env name="APP_SHARE_DIR" value="var/share"/>
+        <!-- ###- symfony/framework-bundle ### -->
+
+        <!-- ###+ symfony/routing ### -->
+        <!-- Configure how to generate URLs in non-HTTP contexts, such as CLI commands. -->
+        <!-- See https://symfony.com/doc/current/routing.html#generating-urls-in-commands -->
+        <env name="DEFAULT_URI" value="http://localhost"/>
+        <!-- ###- symfony/routing ### -->
     </php>
     <source>
         <include>

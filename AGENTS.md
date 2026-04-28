@@ -13,7 +13,7 @@ description: General instructions for the OpenConext Private-key agent workspace
 
 ## Architecture
 
-- **Purpose**: A REST API service that strictly executes cryptographic operations (signing, decrypting) using protected private keys (OpenSSL or PKCS#11), without exposing the keys themselves.
+- **Purpose**: A REST API service that strictly executes cryptographic operations (signing, decrypting) using protected private keys (OpenSSL), without exposing the keys themselves.
 - **Separation of Concerns**: The agent *only* performs private key operations. It does not process or hash the actual message/data (e.g., it expects the client to handle the DigestInfo structure).
 - **Authentication**: Clients authenticate using OAuth 2.0 bearer tokens.
 

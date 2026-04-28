@@ -98,7 +98,7 @@ class ExceptionSubscriberTest extends TestCase
             $this->kernel,
             new Request(),
             HttpKernelInterface::MAIN_REQUEST,
-            new BackendException('HSM unreachable'),
+            new BackendException('Backend unreachable'),
         );
 
         $this->subscriber->onKernelException($event);
@@ -109,7 +109,7 @@ class ExceptionSubscriberTest extends TestCase
         $body = json_decode((string) $response->getContent(), true);
         $this->assertSame('server_error', $body['error']);
         $this->assertSame('A backend operation failed', $body['message']);
-        $this->assertNotSame('HSM unreachable', $body['message']);
+        $this->assertNotSame('Backend unreachable', $body['message']);
     }
 
     public function testGenericExceptionReturns500(): void

@@ -160,13 +160,13 @@ class KeyRegistryTest extends TestCase
     {
         // Two distinct PHP objects that happen to share a backend name
         $instance1 = $this->createMock(SigningBackendInterface::class);
-        $instance1->method('getName')->willReturn('softhsm');
+        $instance1->method('getName')->willReturn('backend-a');
         $instance2 = $this->createMock(DecryptionBackendInterface::class);
-        $instance2->method('getName')->willReturn('softhsm');
+        $instance2->method('getName')->willReturn('backend-a');
 
         $registry = $this->createRegistry();
-        $registry->registerSigningBackend('hsm-key', $instance1);
-        $registry->registerDecryptionBackend('hsm-key', $instance2);
+        $registry->registerSigningBackend('key-b', $instance1);
+        $registry->registerDecryptionBackend('key-b', $instance2);
 
         $this->assertCount(2, $registry->getAllBackends());
     }
@@ -174,20 +174,20 @@ class KeyRegistryTest extends TestCase
     public function testGetBackendsByNameReturnMatchingInstances(): void
     {
         $signing = $this->createMock(SigningBackendInterface::class);
-        $signing->method('getName')->willReturn('softhsm');
+        $signing->method('getName')->willReturn('backend-a');
 
         $decryption = $this->createMock(DecryptionBackendInterface::class);
-        $decryption->method('getName')->willReturn('softhsm');
+        $decryption->method('getName')->willReturn('backend-a');
 
         $other = $this->createMock(SigningBackendInterface::class);
         $other->method('getName')->willReturn('openssl-signing');
 
         $registry = $this->createRegistry();
-        $registry->registerSigningBackend('hsm-key', $signing);
-        $registry->registerDecryptionBackend('hsm-key', $decryption);
+        $registry->registerSigningBackend('key-b', $signing);
+        $registry->registerDecryptionBackend('key-b', $decryption);
         $registry->registerSigningBackend('other-key', $other);
 
-        $result = $registry->getBackendsByName('softhsm');
+        $result = $registry->getBackendsByName('backend-a');
         $this->assertCount(2, $result);
         $this->assertContains($signing, $result);
         $this->assertContains($decryption, $result);

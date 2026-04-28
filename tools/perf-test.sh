@@ -11,7 +11,7 @@
 #   ./tools/perf-test.sh -c 20                  # 20 concurrent workers
 #   ./tools/perf-test.sh -d 30s                 # 30-second duration per endpoint
 #   ./tools/perf-test.sh -c 10 -d 15s sign      # combined
-#   BASE_URL=https://agent.example.com ./tools/perf-test.sh
+#   BASE_URL=http://agent.example.com ./tools/perf-test.sh
 #
 # Requires: hey (https://github.com/rakyll/hey)
 #   Install: go install github.com/rakyll/hey@latest
@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/config/private-key-agent.yaml"
 COMPOSE_FILE="$PROJECT_ROOT/compose.yaml"
-BASE_URL="${BASE_URL:-https://localhost}"
+BASE_URL="${BASE_URL:-http://localhost}"
 CONCURRENCY=10
 DURATION="10s"
 FILTER=""
@@ -112,49 +112,6 @@ prepare_openssl_ciphertext() {
     $ok
 }
 
-# Encrypt plaintext with the SoftHSM public key (OAEP-SHA1).
-# Prints base64-encoded ciphertext on success, returns 1 on failure.
-prepare_hsm_ciphertext() {
-    local tmp_der; tmp_der=$(mktemp_compat .der)
-    local tmp_pub; tmp_pub=$(mktemp_compat .pem)
-    local tmp_enc; tmp_enc=$(mktemp_compat)
-    local plaintext="dev-session-key-12345678"
-    local ok=true
-
-    docker compose -f "$COMPOSE_FILE" exec -T app sh -c "
-        pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
-            --login --pin 1234 \
-            --read-object --type pubkey \
-            --label test-signing-key \
-            --output-file /tmp/hsm-pubkey.der 2>/dev/null
-        cat /tmp/hsm-pubkey.der
-    " > "$tmp_der" 2>/dev/null || ok=false
-
-    if $ok; then
-        openssl pkey -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || openssl rsa -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || ok=false
-    fi
-
-    if $ok && [[ -s "$tmp_pub" ]]; then
-        # SoftHSM 2.6.1 on Alpine only supports OAEP with SHA-1.
-        printf '%s' "$plaintext" | openssl pkeyutl -encrypt \
-            -pubin -inkey "$tmp_pub" \
-            -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha1 \
-            -pkeyopt rsa_mgf1_md:sha1 \
-            -out "$tmp_enc" 2>/dev/null || ok=false
-    else
-        ok=false
-    fi
-
-    if $ok; then
-        base64 < "$tmp_enc"
-    fi
-    rm -f "$tmp_der" "$tmp_pub" "$tmp_enc"
-    $ok
-}
-
 # ── prerequisites ─────────────────────────────────────────────────────────────
 
 [[ -f "$CONFIG_FILE" ]] || die "Config not found. Run: ./tools/setup-dev.sh"
@@ -182,16 +139,6 @@ group_sign() {
             -d "$SIGN_BODY"
     fi
 
-    # SoftHSM backend
-    echo -e "\n  ${BOLD}SoftHSM backend (hsm-key)${NC}"
-    if sanity_check "sign/hsm-key" "${BASE_URL}/sign/hsm-key" \
-        -H "Content-Type: application/json" \
-        -d "$SIGN_BODY"; then
-        run_bench "POST /sign/hsm-key (SoftHSM, RSA-PKCS1-v1.5-SHA256)" \
-            "${BASE_URL}/sign/hsm-key" \
-            -d "$SIGN_BODY"
-    fi
-
     echo ""
 }
 
@@ -216,25 +163,6 @@ group_decrypt() {
         fi
     else
         echo -e "  ${YELLOW}⚠${NC} Skipped — failed to prepare ciphertext"
-    fi
-
-    # ── SoftHSM backend ──────────────────────────────────────────────────────
-
-    echo -e "\n  ${BOLD}SoftHSM backend (hsm-key)${NC}"
-    if ! docker compose -f "$COMPOSE_FILE" ps --services --filter status=running 2>/dev/null | grep -q '^app$'; then
-        echo -e "  ${YELLOW}⚠${NC} Skipped — app container not running"
-    elif HSM_CIPHERTEXT=$(prepare_hsm_ciphertext); then
-        HSM_DECRYPT_BODY="{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha1\",\"encrypted_data\":\"$HSM_CIPHERTEXT\"}"
-
-        if sanity_check "decrypt/hsm-key" "${BASE_URL}/decrypt/hsm-key" \
-            -H "Content-Type: application/json" \
-            -d "$HSM_DECRYPT_BODY"; then
-            run_bench "POST /decrypt/hsm-key (SoftHSM, OAEP-SHA1)" \
-                "${BASE_URL}/decrypt/hsm-key" \
-                -d "$HSM_DECRYPT_BODY"
-        fi
-    else
-        echo -e "  ${YELLOW}⚠${NC} Skipped — could not prepare HSM ciphertext (export or encrypt failed)"
     fi
 
     echo ""

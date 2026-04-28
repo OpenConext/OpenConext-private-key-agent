@@ -165,157 +165,29 @@ YAML;
         }
     }
 
-    public function testLoadPkcs11Backend(): void
+    public function testLoadThrowsUnsupportedBackendTypeIsRejected(): void
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
 backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
+  - name: backend1
+    type: unsupported
+    key_path: /var/www/html/config/keys/signing.key
 keys:
   - name: k1
-    signing_backends: [hsm1]
+    signing_backends: [backend1]
 clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertSame('pkcs11', $config->backends[0]->type);
-            $this->assertSame('/usr/lib/softhsm/libsofthsm2.so', $config->backends[0]->pkcs11Lib);
-            $this->assertSame(0, $config->backends[0]->pkcs11Slot);
-            $this->assertSame('1234', $config->backends[0]->pkcs11Pin);
-            $this->assertSame('my-key', $config->backends[0]->pkcs11KeyLabel);
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadPkcs11BackendWithoutPin(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_key_label: my-key
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertNull($config->backends[0]->pkcs11Pin);
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadThrowsOnPkcs11MissingLib(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [c1]
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
-            $this->expectExceptionMessage('pkcs11_lib');
+            $this->expectExceptionMessage('invalid type');
             ConfigLoader::load($tmpFile);
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadBackendWithEnvironment(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
-    environment:
-      SOFTHSM2_CONF: /etc/softhsm2.conf
-      ANOTHER_VAR: "some value"
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertSame(
-                ['SOFTHSM2_CONF' => '/etc/softhsm2.conf', 'ANOTHER_VAR' => 'some value'],
-                $config->backends[0]->environment,
-            );
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadBackendWithoutEnvironmentDefaultsToEmptyArray(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
-keys:
-  - name: k1
-    signing_backends: [b1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertSame([], $config->backends[0]->environment);
         } finally {
             unlink($tmpFile);
         }

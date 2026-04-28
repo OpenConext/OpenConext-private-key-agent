@@ -12,7 +12,7 @@
 #   ./tools/test-endpoints.sh sign               # run only the signing group
 #   ./tools/test-endpoints.sh decrypt            # run only the decryption group
 #   ./tools/test-endpoints.sh -v sign            # verbose + single group
-#   BASE_URL=https://agent.example.com ./tools/test-endpoints.sh
+#   BASE_URL=http://agent.example.com ./tools/test-endpoints.sh
 #
 # Available groups: health  auth  sign  decrypt
 
@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/config/private-key-agent.yaml"
 COMPOSE_FILE="$PROJECT_ROOT/compose.yaml"
-BASE_URL="${BASE_URL:-https://localhost}"
+BASE_URL="${BASE_URL:-http://localhost}"
 VERBOSE=false
 FILTER=""
 RESP_BODY_FILE=$(mktemp)
@@ -143,11 +143,6 @@ group_sign() {
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
     check "POST /sign/dev-signing-key  (OpenSSL, sha256)" "$status" "200"
 
-    status=$(api POST /sign/hsm-key \
-        -H "Content-Type: application/json" \
-        -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
-    check "POST /sign/hsm-key  (SoftHSM, sha256)" "$status" "200"
-
     # Key not in client's allowed list → 403
     status=$(api POST /sign/unknown-key \
         -H "Content-Type: application/json" \
@@ -187,33 +182,6 @@ group_decrypt() {
         rm -f "$tmp_pub" "$tmp_enc"
     }
 
-    encrypt_with_hsm_key() {
-        local tmp_der; tmp_der=$(mktemp_compat .der)
-        local tmp_pub; tmp_pub=$(mktemp_compat .pem)
-        local tmp_enc; tmp_enc=$(mktemp_compat)
-        local plaintext="dev-session-key-12345678"
-        docker compose -f "$COMPOSE_FILE" exec -T app sh -c "
-            pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
-                --login --pin 1234 \
-                --read-object --type pubkey \
-                --label test-signing-key \
-                --output-file /tmp/hsm-pubkey.der 2>/dev/null
-            cat /tmp/hsm-pubkey.der
-        " > "$tmp_der" 2>/dev/null
-        openssl pkey -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || openssl rsa  -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null
-        # SoftHSM 2.6.1 on Alpine only supports OAEP with SHA-1 (not SHA-256).
-        # Encrypt with SHA-1 so the HSM can decrypt it successfully.
-        printf '%s' "$plaintext" | openssl pkeyutl -encrypt \
-            -pubin -inkey "$tmp_pub" \
-            -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha1 \
-            -pkeyopt rsa_mgf1_md:sha1 \
-            -out "$tmp_enc" 2>/dev/null
-        base64 < "$tmp_enc"
-        rm -f "$tmp_der" "$tmp_pub" "$tmp_enc"
-    }
-
     OPENSSL_DEC_PEM="$PROJECT_ROOT/config/keys/dev-decryption.pem"
     if [[ -f "$OPENSSL_DEC_PEM" ]]; then
         CIPHERTEXT=$(encrypt_with_pem "$OPENSSL_DEC_PEM")
@@ -223,21 +191,6 @@ group_decrypt() {
         check "POST /decrypt/dev-decryption-key  (OpenSSL, OAEP-SHA256)" "$status" "200"
     else
         echo -e "  ${YELLOW}⚠${NC} Skipped OpenSSL decrypt — run ./tools/setup-dev.sh first"
-    fi
-
-    if docker compose -f "$COMPOSE_FILE" ps --services --filter status=running 2>/dev/null | grep -q '^app$'; then
-        CIPHERTEXT=$(encrypt_with_hsm_key)
-        if [[ -n "$CIPHERTEXT" ]]; then
-            # SoftHSM 2.6.1 on Alpine supports OAEP only with SHA-1 as the hash algorithm.
-            status=$(api POST /decrypt/hsm-key \
-                -H "Content-Type: application/json" \
-                -d "{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha1\",\"encrypted_data\":\"$CIPHERTEXT\"}")
-            check "POST /decrypt/hsm-key  (SoftHSM, OAEP-SHA1)" "$status" "200"
-        else
-            echo -e "  ${YELLOW}⚠${NC} Skipped SoftHSM decrypt — could not export public key"
-        fi
-    else
-        echo -e "  ${YELLOW}⚠${NC} Skipped SoftHSM decrypt — app container not running"
     fi
 
     # Missing ciphertext field → 400
