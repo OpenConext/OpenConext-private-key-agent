@@ -27,4 +27,4 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run checks
-        run: docker compose run --rm app composer check
+        run: docker run --rm openconext-private-key-agent-app:latest composer check
