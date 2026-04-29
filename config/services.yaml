@@ -31,6 +31,7 @@ services:
     App\Security\TokenAuthenticator:
         arguments:
             $config: '@App\Config\AgentConfig'
+            $authFailureLimiter: '@limiter.auth_failure'
 
     App\EventSubscriber\ExceptionSubscriber:
         arguments:

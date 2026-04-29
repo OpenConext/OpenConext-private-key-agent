@@ -15,6 +15,10 @@ RUN composer install --no-scripts --no-autoloader --prefer-dist
 # ---- Production stage ----
 FROM ghcr.io/openconext/openconext-basecontainers/php85-apache2:latest AS prod
 
+RUN pecl install apcu \
+    && docker-php-ext-enable apcu \
+    && rm -rf /tmp/pear
+
 WORKDIR /var/www/html
 
 ENV COMPOSER_HOME=/tmp/composer

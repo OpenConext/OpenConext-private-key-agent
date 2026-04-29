@@ -168,6 +168,48 @@ All endpoints except `/health` and `/health/key/{key_name}` require a Bearer tok
 >
 > The field `allowed_keys` is a list of logical **key names** (matching key `name` values) that the client is authorised to use. It is not a set of cryptographic keys or client certificates.
 
+### Brute-force rate limiting
+
+The agent enforces a **failure-only sliding-window rate limit** on the `POST /sign` and `POST /decrypt` endpoints to protect against bearer-token brute-force attacks.
+
+#### Policy
+
+| Parameter | Value |
+|---|---|
+| Window | 60 seconds (sliding) |
+| Maximum failures per IP | 5 |
+| Response when limit exceeded | `429 Too Many Requests` |
+| `Retry-After` header | Seconds until the window resets (minimum 1) |
+
+#### Behaviour
+
+- **Success path is unaffected.** When a request carries a valid bearer token the rate limiter is never consulted. There is zero overhead for legitimate high-frequency callers.
+- **All authentication failures are counted.** Both a missing `Authorization` header and a wrong token consume one token from the sliding window for the caller's IP.
+- **IP key.** The caller's IP is taken from `REMOTE_ADDR` — the direct TCP peer. `X-Forwarded-For` is intentionally ignored to prevent a client from aggregating or spoofing an IP.
+- **Window behaviour.** The sliding window drains naturally. A rejected request does **not** consume an additional token, so the window starts recovering immediately after the last failed attempt.
+
+#### Implementation
+
+Rate limiting is implemented with Symfony's `RateLimiter` component backed by APCu shared memory. APCu is installed in the production Docker image (`pecl install apcu`) and enabled in `docker/app.ini`. Because the service runs under Apache with `mod_php` (prefork model), the APCu shared memory segment is shared across all Apache child processes — the limit is enforced per IP across the entire server, not per worker.
+
+In the `test` environment, the APCu pool is replaced with an in-memory array adapter so that PHPUnit tests run without APCu available in CLI.
+
+> **PHP-FPM incompatibility.** APCu is per-process in PHP-FPM: each worker has an isolated memory segment, so failure counts are not shared across workers. A client could exhaust its limit on one worker and immediately get fresh tokens on another — the per-IP limit would not be enforced. The APCu backend is only correct under **mod_php + Apache prefork**, where all Apache child processes share the same APCu mmap segment. If the deployment model changes to PHP-FPM, replace the `cache.rate_limiter` pool in `config/packages/cache.yaml` with a network-shared backend (Redis or Memcached). No other code changes are required.
+
+#### 429 response example
+
+```
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 47
+
+{
+  "status": 429,
+  "error": "too_many_requests",
+  "message": "Too many failed authentication attempts"
+}
+```
+
 ### `POST /sign/{key_name}`
 
 Signs a hash value using the specified key. The `key_name` path parameter must match `[a-zA-Z0-9_-]{1,64}`.
@@ -305,6 +347,7 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 | 401 | `invalid_token` | Missing or invalid bearer token |
 | 403 | `access_denied` | Client not permitted to use the key |
 | 404 | `not_found` | Key not registered or operation not permitted for key |
+| 429 | `too_many_requests` | Too many failed authentication attempts from this IP |
 | 500 | `server_error` | Backend failure (OpenSSL error) |
 
 ---
@@ -511,7 +554,8 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 - Extracts the Bearer token from the `Authorization` header.
 - Iterates configured clients and compares tokens using `hash_equals()`.
 - Returns the matched `ClientConfig` as the authenticated entity.
-- Throws `AuthenticationException` (→ 401 with `WWW-Authenticate` header) when authentication fails.
+- On any authentication failure (missing token or wrong token), calls a private `recordFailure()` helper that consumes one token from the rate-limiter window for the caller IP. If the window is exhausted, throws `RateLimitException` (→ 429 + `Retry-After`). Otherwise throws `AuthenticationException` (→ 401 + `WWW-Authenticate`).
+- The success path never interacts with the rate limiter.
 
 ### `AccessControlService`
 
@@ -527,6 +571,7 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
   - `AuthenticationException` → 401 + `WWW-Authenticate` header
   - `AccessDeniedException` → 403
   - `KeyNotFoundException` → 404
+  - `RateLimitException` → 429 + `Retry-After: <seconds>` header
   - `BackendException` → 500
   - Unhandled exceptions → 500
 
@@ -714,7 +759,7 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
 | Level | Events |
 |---|---|
 | INFO | Each sign/decrypt request: client name, key name, algorithm |
-| WARNING | Access denied, invalid token attempts |
+| WARNING | Access denied, invalid token attempts, rate limit exceeded (IP logged) |
 | ERROR | Backend failures, config load failures |
 | **Never logged** | Bearer tokens, key material, hash values, plaintext data, decrypted values |
 
@@ -731,6 +776,7 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
     "symfony/framework-bundle": "^7.4",
     "symfony/monolog-bundle": "^3.10",
     "symfony/property-access": "^7.4",
+    "symfony/rate-limiter": "^7.4",
     "symfony/runtime": "^7.4",
     "symfony/security-bundle": "^7.4",
     "symfony/serializer": "^7.4",
@@ -762,7 +808,7 @@ Four stages:
 
 - **`vendor`**: `composer:2` image. Installs production Composer dependencies (`--no-dev`) into `/var/www/html/vendor`. Running `composer install` here avoids the need for `zip`/`git` tooling in the runtime image.
 - **`vendor-dev`**: `composer:2` image. Installs all Composer dependencies (including dev) into `/var/www/html/vendor`. Used exclusively by the `dev` stage.
-- **`prod`**: `ghcr.io/openconext/openconext-basecontainers/php85-apache2` (Debian, PHP 8.5 with Apache 2.4). Copies the vendor directory from `vendor`, copies application source, generates an optimised classmap autoloader, installs PHP OPcache settings from `docker/app.ini`, deploys the Apache vhost from `docker/apache-app.conf`, and pre-warms the Symfony cache (`APP_DEBUG=0`). The web root is `/var/www/html`.
+- **`prod`**: `ghcr.io/openconext/openconext-basecontainers/php85-apache2` (Debian, PHP 8.5 with Apache 2.4). Copies the vendor directory from `vendor`, copies application source, generates an optimised classmap autoloader, installs PHP OPcache and APCu settings from `docker/app.ini`, deploys the Apache vhost from `docker/apache-app.conf`, and pre-warms the Symfony cache (`APP_DEBUG=0`). APCu is compiled and enabled via `pecl install apcu && docker-php-ext-enable apcu` (the base image does not ship APCu). The web root is `/var/www/html`.
 - **`dev`**: Extends `prod`. Replaces the vendor directory with the one from `vendor-dev` (adds dev dependencies) and regenerates the autoloader. Used by `compose.yaml`.
 
 ### PHP configuration (`docker/app.ini`)
@@ -831,7 +877,7 @@ The following estimates are derived from published OpenSSL benchmarks (`openssl 
 | JSON deserialization + validation | ~0.2 ms | Small payload (~100 bytes), two constraint checks |
 | RSA private key operation | ~0.7 ms | `openssl_private_encrypt()` / `openssl_private_decrypt()`; includes DigestInfo construction for signing |
 | JSON serialization + response | ~0.1 ms | Single Base64 field |
-| **Total per request** | **~2.2 ms** | |
+| **Total per request** | **~2.2 ms** | Rate limiter adds zero overhead on the success path (not consulted) |
 
 Approximate per-worker throughput: ~450 ops/sec.
 

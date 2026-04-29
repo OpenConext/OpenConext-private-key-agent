@@ -43,6 +43,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 
 - **OpenSSL backend:** software PEM keys protected by the agent process.
 - **Static bearer-token authentication** (RFC 6750): each client has a pre-shared token; tokens are compared with `hash_equals()` to prevent timing attacks.
+- **Brute-force rate limiting:** sliding-window limiter (5 failures / 60 s per IP); only failed authentication attempts are counted — the success path has zero overhead.
 - **Per-client key authorisation:** each client declares the key names it may use.
 - **Fail-fast configuration:** invalid or missing config prevents the PHP-FPM worker from starting.
 - **Health endpoints:** `/health` and `/health/key/{key_name}` for liveness probes and monitoring.
@@ -434,7 +435,21 @@ For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.m
 | `GET` | `/health` | None | Overall health |
 | `GET` | `/health/key/{key_name}` | None | Per-key health |
 
-Error responses follow RFC 6750 and always include `status`, `error`, and an optional `message` field. On `401` a `WWW-Authenticate` header is also returned.
+Error responses follow RFC 6750 and always include `status`, `error`, and an optional `message` field. On `401` a `WWW-Authenticate` header is also returned. On `429` a `Retry-After` header is returned indicating the number of seconds until the rate-limit window resets.
+
+### Rate limiting
+
+The `POST /sign` and `POST /decrypt` endpoints apply a **failure-only sliding-window rate limit** per caller IP to protect against bearer-token brute-force attacks.
+
+| Parameter | Value |
+|---|---|
+| Window | 60 seconds (sliding) |
+| Maximum failures per IP | 5 |
+| Response when exceeded | `429 Too Many Requests` + `Retry-After` header |
+
+**Only failed authentication attempts are counted.** Requests with a valid bearer token never touch the rate limiter, so there is no performance impact on normal high-frequency usage. The IP key is taken from `REMOTE_ADDR` (not `X-Forwarded-For`) to prevent clients from spoofing a shared proxy IP.
+
+Rate limit state is stored in APCu shared memory, which is shared across all Apache worker processes within the same host. In the test environment the in-memory array adapter is used instead.
 
 ### Interactive API documentation (Swagger UI)
 
