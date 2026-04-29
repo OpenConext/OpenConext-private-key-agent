@@ -17,8 +17,10 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 use function base64_decode;
 use function base64_encode;
+use function hrtime;
 use function is_array;
 use function json_decode;
+use function round;
 
 final class DecryptController
 {
@@ -59,7 +61,16 @@ final class DecryptController
             throw new InvalidRequestException('Invalid base64-encoded encrypted_data');
         }
 
+        $start          = hrtime(true);
         $plaintextBytes = $backend->decrypt($ciphertextBytes, $decryptRequest->algorithm);
+        $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
+
+        $this->logger->debug('decrypt completed', [
+            'key'        => $keyName,
+            'algorithm'  => $decryptRequest->algorithm,
+            'durationMs' => $durationMs,
+            'backend'    => $backend->getName(),
+        ]);
 
         $this->logger->info('Decryption request processed', [
             'client' => $client->name,

@@ -17,8 +17,10 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 use function base64_decode;
 use function base64_encode;
+use function hrtime;
 use function is_array;
 use function json_decode;
+use function round;
 
 final class SignController
 {
@@ -59,7 +61,16 @@ final class SignController
             throw new InvalidRequestException('Invalid base64-encoded hash');
         }
 
+        $start          = hrtime(true);
         $signatureBytes = $backend->sign($hashBytes, $signRequest->algorithm);
+        $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
+
+        $this->logger->debug('sign completed', [
+            'key'        => $keyName,
+            'algorithm'  => $signRequest->algorithm,
+            'durationMs' => $durationMs,
+            'backend'    => $backend->getName(),
+        ]);
 
         $this->logger->info('Signing request processed', [
             'client' => $client->name,
