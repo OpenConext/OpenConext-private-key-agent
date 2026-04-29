@@ -1,7 +1,9 @@
 #!/bin/sh
 set -e
 
-composer install --no-interaction
+if [ "${APP_ENV:-dev}" != "prod" ]; then
+    composer install --no-interaction
+fi
 
 if [ $# -gt 0 ]; then
     exec "$@"
