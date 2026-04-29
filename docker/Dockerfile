@@ -46,3 +46,7 @@ FROM prod AS dev
 COPY --from=vendor-dev /var/www/html/vendor ./vendor
 RUN composer dump-autoload \
     && chown -R www-data:www-data /var/www/html
+
+COPY docker/entrypoint-dev.sh /entrypoint-dev.sh
+RUN chmod +x /entrypoint-dev.sh
+ENTRYPOINT ["/entrypoint-dev.sh"]
