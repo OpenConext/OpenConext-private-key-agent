@@ -2,8 +2,8 @@
 
 **Date:** 2025-04-29  
 **Test duration:** 481 seconds (~8 minutes wall-clock)  
-**Environment:** Docker (PHP 8.5-FPM, OpenSSL backend), MacOS developer host (not production hardware)  
-**PHP-FPM workers:** default configuration; sign and decrypt phases run sequentially (not interleaved)  
+**Environment:** Docker (PHP 8.5 mod_php / Apache 2, OpenSSL backend), MacOS developer host (not production hardware)  
+**Apache workers:** default configuration; sign and decrypt phases run sequentially (not interleaved)  
 **Debug logging:** enabled (`LOG_LEVEL=debug`); Monolog JSON to stdout  
 **Key material:** RSA 2048-bit (dev-signing-key, dev-decryption-key)
 
@@ -42,12 +42,12 @@ Validation on production-grade hardware is required before making production cap
   container allocation budgets.
 - **Post-stress recovery is degraded**: at identical concurrency (6c), throughput after the stress
   burst dropped 23 % for sign and 36 % for decrypt compared to the pre-stress baseline. The cause
-  is unconfirmed; PHP-FPM worker configuration is a likely factor and warrants investigation.
+  is unconfirmed; Apache worker configuration is a likely factor and warrants investigation.
 - **Long-tail latency spikes occurred under load**: the maximum response time reached 2,683 ms
   under 50-concurrent sign load (Phase 3), with at least two additional spikes exceeding 1 s
   across phases. P99 values remain below 140 ms. The root cause has not been identified.
 - **The service is a strong candidate for production deployment**, but production hardware
-  benchmarks, PHP-FPM tuning, and SLA definition are recommended before formal sign-off.
+  benchmarks, Apache worker tuning, and SLA definition are recommended before formal sign-off.
 
 ---
 
@@ -72,7 +72,7 @@ Validation on production-grade hardware is required before making production cap
 ### Instrumentation
 
 - **Debug-level timing logs** emitted by `SignController` and `DecryptController` via Monolog JSON;
-  each request logs `durationMs` of the backend RSA operation (excludes HTTP/FPM overhead).
+  each request logs `durationMs` of the backend RSA operation (excludes HTTP/Apache overhead).
 - **Docker stats** sampled every 10 seconds (43 samples total).
 - **Load generator:** `hey` (HTTP load testing tool).
 
@@ -131,7 +131,7 @@ Observations:
 Observations:
 - Recovery throughput is **23–36 % below the Phase 1 baseline** at identical concurrency/duration.
   This is a significant regression for decrypt specifically.
-- Average latency increased from 7.7 ms (Phase 1) to 10.0 ms (Phase 4) for sign. PHP-FPM worker
+- Average latency increased from 7.7 ms (Phase 1) to 10.0 ms (Phase 4) for sign. Apache worker
   state after heavy load is a plausible hypothesis; profiling would be needed to confirm.
 - P99 for decrypt climbed to 53.5 ms (vs 14.2 ms in Phase 1) — persistent elevated tail latency
   following the stress burst.
@@ -141,7 +141,7 @@ Observations:
 
 ## 3. Backend Crypto Operation Timing (Debug Logs)
 
-These timings measure only the RSA operation inside the PHP controller, excluding HTTP/FPM
+These timings measure only the RSA operation inside the PHP controller, excluding HTTP/Apache
 queueing, TLS, network, and request-parsing overhead.
 
 | Operation | n | Min | Avg | p95 | p99 | Max |
@@ -151,9 +151,9 @@ queueing, TLS, network, and request-parsing overhead.
 
 Key insight: **The cryptographic backend accounts for only 1–2 ms of each request's total
 latency.** Under sustained 20-concurrent load, end-to-end HTTP latency averages 18–21 ms — meaning
-16–19 ms is consumed by non-crypto request overhead (PHP-FPM queueing, Symfony framework,
+16–19 ms is consumed by non-crypto request overhead (Apache request handling, Symfony framework,
 Docker network, and HTTP infrastructure). This ratio confirms that further backend crypto
-optimisation would yield minimal gains; PHP-FPM worker tuning would have greater impact at higher
+optimisation would yield minimal gains; Apache worker tuning would have greater impact at higher
 concurrency.
 
 The total debug-logged operations (235,639 + 218,636 = 454,275) agrees within one count of the
@@ -174,14 +174,14 @@ Docker stats were sampled every 10 seconds (43 samples) throughout all four phas
 | Peak utilisation | **≤ 2.3 % of limit** |
 
 Observations:
-- Memory grows proportionally with PHP-FPM worker count under stress and is reclaimed after the
+- Memory grows proportionally with Apache worker count under stress and is reclaimed after the
   burst phase ends.
 - At the observed peak (365.8 MiB), the service uses approximately 2.3 % of the 15.6 GiB
   container memory limit. Short-lived spikes between samples may be higher.
 - No OOM kill occurred. For production deployments, a 512 MiB container memory limit provides
   comfortable headroom over the observed maximum.
 - CPU usage peaked at ~257 % (2.57 cores on the macOS host) during Phase 1 and averaged ~190 %
-  during sustained phases, consistent with a multi-process PHP-FPM setup.
+  during sustained phases, consistent with Apache prefork mod_php spawning multiple worker processes.
 
 ---
 
@@ -218,17 +218,16 @@ continuous load. There were no segfaults, no backend exceptions, and no OOM even
 
 1. **Post-stress recovery regression**: Phase 4 throughput (479–598 req/s) is 23–36 % below the
    Phase 1 baseline (748–775 req/s) at identical settings, and P99 for decrypt nearly quadrupled.
-   PHP-FPM `pm.max_spare_servers` / `pm.process_idle_timeout` tuning is a likely lever; profiling
+   Apache `MaxSpareServers` / `MaxConnectionsPerChild` tuning is a likely lever; profiling
    is needed to confirm the root cause.
 
 2. **Long-tail latency spikes**: Multiple requests exceeded 1 s across phases (1,124.7 ms in
    Phase 2 sign, 2,682.8 ms in Phase 3 sign). While statistically rare (P99 ≤ 136 ms), the root
-   cause is unknown. Consider setting PHP-FPM `request_terminate_timeout` to enforce an upper
-   bound.
+   cause is unknown. Consider setting Apache `Timeout` to enforce an upper bound.
 
 3. **Non-crypto request overhead dominates latency**: At 20+ concurrent clients, non-crypto
    overhead (16–19 ms of ~18–21 ms total) outweighs the 1–2 ms crypto cost. Increasing
-   `pm.max_children` or migrating to a non-blocking runtime (e.g., RoadRunner) would reduce this
+   `MaxRequestWorkers` or migrating to a non-blocking runtime (e.g., RoadRunner) would reduce this
    overhead.
 
 4. **Production hardware validation required**: All results were obtained on a MacOS developer

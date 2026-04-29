@@ -274,7 +274,7 @@ collect_stats() {
 
 collect_stats &
 STATS_PID=$!
-trap 'kill "$STATS_PID" 2>/dev/null || true; restore_log_level' EXIT
+trap 'kill "$STATS_PID" 2>/dev/null || true; wait "$STATS_PID" 2>/dev/null || true; restore_log_level' EXIT
 
 ok "Docker stats collector started (PID $STATS_PID, sampling every 10s)"
 
@@ -301,19 +301,20 @@ run_phase "Phase4-Recovery" 6 30s
 END_TIME=$(date +%s)
 TOTAL_SECONDS=$((END_TIME - START_TIME))
 
-# ── Stop stats collector ──────────────────────────────────────────────────────
-
-kill "$STATS_PID" 2>/dev/null || true
-restore_log_level
-trap - EXIT
-
-# ── Collect post-run container state ─────────────────────────────────────────
+# ── Collect post-run container state (before restore_log_level recreates the container) ──
 
 hdr "Post-run analysis"
 
 RESTART_COUNT_AFTER=$(docker inspect --format='{{.RestartCount}}' "$CONTAINER" 2>/dev/null || echo "?")
 EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' "$CONTAINER" 2>/dev/null || echo "?")
 OOM_KILLED=$(docker inspect --format='{{.State.OOMKilled}}' "$CONTAINER" 2>/dev/null || echo "?")
+
+# ── Stop stats collector ──────────────────────────────────────────────────────
+
+kill "$STATS_PID" 2>/dev/null || true
+wait "$STATS_PID" 2>/dev/null || true   # reap the process to suppress bash's "Terminated" message
+restore_log_level
+trap - EXIT
 
 info "RestartCount after test: $RESTART_COUNT_AFTER (was: $RESTART_COUNT_BEFORE)"
 info "Last ExitCode: $EXIT_CODE"
@@ -450,7 +451,12 @@ log "  Total wall-clock time : ${TOTAL_SECONDS}s"
 log ""
 
 log "  ${BOLD}Stability${NC}"
-log "  Container restarts    : $((RESTART_COUNT_AFTER - RESTART_COUNT_BEFORE))"
+if [[ "$RESTART_COUNT_AFTER" =~ ^[0-9]+$ ]] && [[ "$RESTART_COUNT_BEFORE" =~ ^[0-9]+$ ]]; then
+    RESTART_DELTA=$((RESTART_COUNT_AFTER - RESTART_COUNT_BEFORE))
+else
+    RESTART_DELTA="?"
+fi
+log "  Container restarts    : $RESTART_DELTA"
 log "  OOM killed            : $OOM_KILLED"
 log "  Last exit code        : $EXIT_CODE"
 log "  Segfaults detected    : $SEGFAULTS"
