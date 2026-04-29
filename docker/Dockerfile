@@ -25,7 +25,12 @@ ENV COMPOSER_HOME=/tmp/composer
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY --from=vendor /var/www/html/vendor ./vendor
-COPY . .
+COPY .env composer.json composer.lock symfony.lock ./
+COPY bin/ ./bin/
+COPY config/ ./config/
+COPY public/ ./public/
+COPY src/ ./src/
+COPY templates/ ./templates/
 RUN composer dump-autoload --optimize --classmap-authoritative
 
 COPY docker/app.ini /usr/local/etc/php/conf.d/app.ini
@@ -44,6 +49,8 @@ RUN APP_ENV=${APP_ENV} APP_DEBUG=${APP_DEBUG} APP_SECRET=${APP_SECRET} LOG_LEVEL
 FROM prod AS dev
 
 COPY --from=vendor-dev /var/www/html/vendor ./vendor
+COPY tests/ ./tests/
+COPY phpcs.xml phpunit.xml.dist phpstan.neon phpstan-baseline.neon .phplint.yml ./
 RUN composer dump-autoload \
     && chown -R www-data:www-data /var/www/html
 
