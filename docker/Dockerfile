@@ -27,7 +27,11 @@ RUN composer dump-autoload --optimize --classmap-authoritative
 COPY docker/app.ini /usr/local/etc/php/conf.d/app.ini
 COPY docker/apache-app.conf /etc/apache2/sites-enabled/000-default.conf
 
-RUN APP_ENV=prod APP_DEBUG=0 APP_SECRET=build-time-secret LOG_LEVEL=info DEFAULT_URI=http://localhost php bin/console cache:warmup \
+ARG APP_SECRET=build-time-placeholder
+ARG LOG_LEVEL=info
+ARG DEFAULT_URI=http://localhost
+
+RUN APP_ENV=prod APP_DEBUG=0 APP_SECRET=${APP_SECRET} LOG_LEVEL=${LOG_LEVEL} DEFAULT_URI=${DEFAULT_URI} php bin/console cache:warmup \
     && chown -R www-data:www-data /var/www/html/var
 
 # ---- Development stage (extends prod with all dev tooling) ----
