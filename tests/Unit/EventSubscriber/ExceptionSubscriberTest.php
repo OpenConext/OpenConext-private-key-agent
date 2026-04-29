@@ -15,6 +15,8 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 use function json_decode;
@@ -147,6 +149,46 @@ class ExceptionSubscriberTest extends TestCase
         $this->assertNotNull($response);
         $header = (string) $response->headers->get('WWW-Authenticate');
         $this->assertStringContainsString('error_description="Token \\"abc\\" is invalid"', $header);
+    }
+
+    public function testNotFoundHttpExceptionReturns404(): void
+    {
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new NotFoundHttpException(),
+        );
+
+        $this->subscriber->onKernelException($event);
+        $response = $event->getResponse();
+
+        $this->assertNotNull($response);
+        $this->assertSame(404, $response->getStatusCode());
+        $body = json_decode((string) $response->getContent(), true);
+        $this->assertSame(404, $body['status']);
+        $this->assertSame('not_found', $body['error']);
+        $this->assertSame('Route not found', $body['message']);
+    }
+
+    public function testMethodNotAllowedHttpExceptionReturns405(): void
+    {
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new MethodNotAllowedHttpException(['GET', 'POST']),
+        );
+
+        $this->subscriber->onKernelException($event);
+        $response = $event->getResponse();
+
+        $this->assertNotNull($response);
+        $this->assertSame(405, $response->getStatusCode());
+        $body = json_decode((string) $response->getContent(), true);
+        $this->assertSame(405, $body['status']);
+        $this->assertSame('method_not_allowed', $body['error']);
+        $this->assertSame('Method not allowed', $body['message']);
     }
 
     public function testGenericExceptionReturns500(): void

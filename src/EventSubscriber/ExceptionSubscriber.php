@@ -13,6 +13,8 @@ use App\Exception\KeyNotFoundException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 use function sprintf;
@@ -40,12 +42,14 @@ final class ExceptionSubscriber implements EventSubscriberInterface
         $exception = $event->getThrowable();
 
         [$status, $error, $message] = match (true) {
-            $exception instanceof InvalidRequestException => [400, 'invalid_request', $exception->getMessage()],
-            $exception instanceof AuthenticationException => [401, 'invalid_token', $exception->getMessage()],
-            $exception instanceof AccessDeniedException   => [403, 'access_denied', $exception->getMessage()],
-            $exception instanceof KeyNotFoundException    => [404, 'not_found', $exception->getMessage()],
-            $exception instanceof BackendException        => [500, 'server_error', 'A backend operation failed'],
-            default                                       => [500, 'server_error', 'Internal server error'],
+            $exception instanceof InvalidRequestException      => [400, 'invalid_request', $exception->getMessage()],
+            $exception instanceof AuthenticationException      => [401, 'invalid_token', $exception->getMessage()],
+            $exception instanceof AccessDeniedException        => [403, 'access_denied', $exception->getMessage()],
+            $exception instanceof KeyNotFoundException         => [404, 'not_found', $exception->getMessage()],
+            $exception instanceof NotFoundHttpException        => [404, 'not_found', 'Route not found'],
+            $exception instanceof MethodNotAllowedHttpException => [405, 'method_not_allowed', 'Method not allowed'],
+            $exception instanceof BackendException             => [500, 'server_error', 'A backend operation failed'],
+            default                                            => [500, 'server_error', 'Internal server error'],
         };
 
         $response = new JsonResponse([

@@ -1,0 +1,3 @@
+when@dev:
+    twig:
+        file_name_pattern: '*.twig'
