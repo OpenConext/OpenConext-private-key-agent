@@ -19,8 +19,6 @@ use function base64_decode;
 use function base64_encode;
 use function is_array;
 use function json_decode;
-use function str_starts_with;
-use function substr;
 
 final class SignController
 {
@@ -36,8 +34,7 @@ final class SignController
     #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'])]
     public function sign(Request $request, string $keyName): JsonResponse
     {
-        $token  = $this->extractBearerToken($request);
-        $client = $this->authenticator->authenticate($token);
+        $client = $this->authenticator->authenticate($request);
 
         $this->accessControl->checkAccess($client, $keyName);
 
@@ -74,15 +71,5 @@ final class SignController
         return new JsonResponse([
             'signature' => base64_encode($signatureBytes),
         ]);
-    }
-
-    private function extractBearerToken(Request $request): string
-    {
-        $header = $request->headers->get('Authorization', '');
-        if (! str_starts_with($header, 'Bearer ')) {
-            return '';
-        }
-
-        return substr($header, 7);
     }
 }

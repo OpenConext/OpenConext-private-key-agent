@@ -130,8 +130,18 @@ class SignControllerTest extends TestCase
         $request->headers->set('Authorization', 'Bearer test-token');
         $request->headers->set('Content-Type', 'application/json');
 
-        // Client 'test-client' only has access to 'my-key', not 'other-key'
         $this->expectException(AccessDeniedException::class);
         $this->controller->sign($request, 'other-key');
+    }
+
+    public function testSignThrowsOnNonArrayJsonBody(): void
+    {
+        $request = new Request(content: '"just a string"');
+        $request->headers->set('Authorization', 'Bearer test-token');
+        $request->headers->set('Content-Type', 'application/json');
+
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('Invalid JSON body');
+        $this->controller->sign($request, 'my-key');
     }
 }

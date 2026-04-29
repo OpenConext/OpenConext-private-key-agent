@@ -23,7 +23,7 @@ final class KeyRegistryBootstrapper
         return $registry;
     }
 
-    public function bootstrap(AgentConfig $config, KeyRegistry $registry): void
+    private function bootstrap(AgentConfig $config, KeyRegistry $registry): void
     {
         foreach ($config->keys as $key) {
             $backend = new OpenSslBackend($key->name, $key->keyPath);

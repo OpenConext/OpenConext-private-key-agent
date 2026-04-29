@@ -19,8 +19,6 @@ use function base64_decode;
 use function base64_encode;
 use function is_array;
 use function json_decode;
-use function str_starts_with;
-use function substr;
 
 final class DecryptController
 {
@@ -36,8 +34,7 @@ final class DecryptController
     #[Route('/decrypt/{keyName}', name: 'decrypt', methods: ['POST'])]
     public function decrypt(Request $request, string $keyName): JsonResponse
     {
-        $token  = $this->extractBearerToken($request);
-        $client = $this->authenticator->authenticate($token);
+        $client = $this->authenticator->authenticate($request);
 
         $this->accessControl->checkAccess($client, $keyName);
 
@@ -49,7 +46,6 @@ final class DecryptController
         $decryptRequest                = new DecryptRequest();
         $decryptRequest->algorithm     = $data['algorithm'] ?? '';
         $decryptRequest->encryptedData = $data['encrypted_data'] ?? '';
-        $decryptRequest->label         = $data['label'] ?? null;
 
         $violations = $this->validator->validate($decryptRequest);
         if ($violations->count() > 0) {
@@ -63,15 +59,7 @@ final class DecryptController
             throw new InvalidRequestException('Invalid base64-encoded encrypted_data');
         }
 
-        $labelBytes = null;
-        if ($decryptRequest->label !== null) {
-            $labelBytes = base64_decode($decryptRequest->label, true);
-            if ($labelBytes === false) {
-                throw new InvalidRequestException('Invalid base64-encoded label');
-            }
-        }
-
-        $plaintextBytes = $backend->decrypt($ciphertextBytes, $decryptRequest->algorithm, $labelBytes);
+        $plaintextBytes = $backend->decrypt($ciphertextBytes, $decryptRequest->algorithm);
 
         $this->logger->info('Decryption request processed', [
             'client' => $client->name,
@@ -83,15 +71,5 @@ final class DecryptController
         return new JsonResponse([
             'decrypted_data' => base64_encode($plaintextBytes),
         ]);
-    }
-
-    private function extractBearerToken(Request $request): string
-    {
-        $header = $request->headers->get('Authorization', '');
-        if (! str_starts_with($header, 'Bearer ')) {
-            return '';
-        }
-
-        return substr($header, 7);
     }
 }

@@ -1,5 +1,0 @@
-security:
-    firewalls:
-        main:
-            stateless: true
-            security: false

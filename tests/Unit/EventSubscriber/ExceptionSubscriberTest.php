@@ -10,6 +10,7 @@ use App\Exception\AccessDeniedException;
 use App\Exception\AuthenticationException;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
+use App\Exception\KeyNotFoundException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
@@ -109,6 +110,43 @@ class ExceptionSubscriberTest extends TestCase
         $this->assertSame('server_error', $body['error']);
         $this->assertSame('A backend operation failed', $body['message']);
         $this->assertNotSame('Backend unreachable', $body['message']);
+    }
+
+    public function testKeyNotFoundExceptionReturns404(): void
+    {
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new KeyNotFoundException('Key "missing" not found'),
+        );
+
+        $this->subscriber->onKernelException($event);
+        $response = $event->getResponse();
+
+        $this->assertNotNull($response);
+        $this->assertSame(404, $response->getStatusCode());
+        $body = json_decode((string) $response->getContent(), true);
+        $this->assertSame(404, $body['status']);
+        $this->assertSame('not_found', $body['error']);
+        $this->assertSame('Key "missing" not found', $body['message']);
+    }
+
+    public function testAuthenticationExceptionWithQuotesEscapedInWwwAuthenticateHeader(): void
+    {
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new AuthenticationException('Token "abc" is invalid'),
+        );
+
+        $this->subscriber->onKernelException($event);
+        $response = $event->getResponse();
+
+        $this->assertNotNull($response);
+        $header = (string) $response->headers->get('WWW-Authenticate');
+        $this->assertStringContainsString('error_description="Token \\"abc\\" is invalid"', $header);
     }
 
     public function testGenericExceptionReturns500(): void

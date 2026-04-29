@@ -7,10 +7,12 @@ namespace App\Tests\Integration\Backend;
 use App\Backend\OpenSslBackend;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 use function assert;
 use function file_get_contents;
+use function file_put_contents;
 use function hash;
 use function is_array;
 use function openssl_pkey_export_to_file;
@@ -25,6 +27,7 @@ use function sys_get_temp_dir;
 use function tempnam;
 use function unlink;
 
+use const OPENSSL_KEYTYPE_EC;
 use const OPENSSL_KEYTYPE_RSA;
 use const OPENSSL_PKCS1_OAEP_PADDING;
 use const OPENSSL_PKCS1_PADDING;
@@ -128,10 +131,57 @@ class OpenSslBackendTest extends TestCase
         $backend->decrypt(str_repeat("\x00", self::$modulusBytes), 'rsa-unknown-algo');
     }
 
-    public function testConstructorThrowsOnMissingKeyFile(): void
+    public function testConstructorThrowsOnInvalidKeyContent(): void
     {
-        $this->expectException(BackendException::class);
-        $this->expectExceptionMessage('Cannot read key file');
-        new OpenSslBackend('bad-key', '/nonexistent/path.pem');
+        $tmpFile = tempnam(sys_get_temp_dir(), 'pem_') . '.pem';
+        file_put_contents($tmpFile, 'not-a-valid-pem');
+
+        try {
+            $this->expectException(BackendException::class);
+            $this->expectExceptionMessage('Invalid private key');
+            new OpenSslBackend('bad-key', $tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testConstructorThrowsOnNonRsaKey(): void
+    {
+        $ecKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+        self::assertNotFalse($ecKey);
+        $tmpFile = tempnam(sys_get_temp_dir(), 'ec_') . '.pem';
+        openssl_pkey_export_to_file($ecKey, $tmpFile);
+
+        try {
+            $this->expectException(BackendException::class);
+            $this->expectExceptionMessage('Non-RSA key loaded');
+            new OpenSslBackend('ec-key', $tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    #[DataProvider('oaepSha2AlgorithmProvider')]
+    public function testDecryptRoundtripWithOaepSha2(string $algorithm, string $digest): void
+    {
+        $backend    = new OpenSslBackend('test-key', self::$keyPath);
+        $plaintext  = 'secret-sha2-message';
+        $ciphertext = '';
+        $encrypted  = openssl_public_encrypt($plaintext, $ciphertext, $this->getPublicKey(), OPENSSL_PKCS1_OAEP_PADDING, digest_algo: $digest);
+        self::assertTrue($encrypted, 'openssl_public_encrypt with digest_algo failed');
+
+        $result = $backend->decrypt($ciphertext, $algorithm);
+        $this->assertSame($plaintext, $result);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function oaepSha2AlgorithmProvider(): array
+    {
+        return [
+            'sha224' => ['rsa-pkcs1-oaep-mgf1-sha224', 'sha224'],
+            'sha256' => ['rsa-pkcs1-oaep-mgf1-sha256', 'sha256'],
+            'sha384' => ['rsa-pkcs1-oaep-mgf1-sha384', 'sha384'],
+            'sha512' => ['rsa-pkcs1-oaep-mgf1-sha512', 'sha512'],
+        ];
     }
 }

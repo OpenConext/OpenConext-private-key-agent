@@ -9,9 +9,20 @@ use App\Config\ClientConfig;
 use App\Exception\AuthenticationException;
 use App\Security\TokenAuthenticator;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\Request;
 
 class TokenAuthenticatorTest extends TestCase
 {
+    private function makeRequest(string $token): Request
+    {
+        $request = new Request();
+        if ($token !== '') {
+            $request->headers->set('Authorization', 'Bearer ' . $token);
+        }
+
+        return $request;
+    }
+
     public function testAuthenticateWithValidToken(): void
     {
         $config = new AgentConfig(
@@ -23,7 +34,7 @@ class TokenAuthenticatorTest extends TestCase
         );
 
         $authenticator = new TokenAuthenticator($config);
-        $client        = $authenticator->authenticate('valid-token-here-must-be-long');
+        $client        = $authenticator->authenticate($this->makeRequest('valid-token-here-must-be-long'));
 
         $this->assertSame('my-client', $client->name);
         $this->assertSame(['key1'], $client->allowedKeys);
@@ -42,10 +53,10 @@ class TokenAuthenticatorTest extends TestCase
         $authenticator = new TokenAuthenticator($config);
 
         $this->expectException(AuthenticationException::class);
-        $authenticator->authenticate('wrong-token');
+        $authenticator->authenticate($this->makeRequest('wrong-token'));
     }
 
-    public function testAuthenticateWithEmptyTokenThrows(): void
+    public function testAuthenticateWithMissingAuthorizationHeaderThrows(): void
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
@@ -58,7 +69,25 @@ class TokenAuthenticatorTest extends TestCase
         $authenticator = new TokenAuthenticator($config);
 
         $this->expectException(AuthenticationException::class);
-        $authenticator->authenticate('');
+        $authenticator->authenticate(new Request());
+    }
+
+    public function testAuthenticateWithNonBearerSchemeThrows(): void
+    {
+        $config = new AgentConfig(
+            agentName: 'test-agent',
+            keys: [],
+            clients: [
+                new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
+            ],
+        );
+
+        $authenticator = new TokenAuthenticator($config);
+        $request       = new Request();
+        $request->headers->set('Authorization', 'Basic dXNlcjpwYXNz');
+
+        $this->expectException(AuthenticationException::class);
+        $authenticator->authenticate($request);
     }
 
     public function testAuthenticateUsesTimingSafeComparison(): void
@@ -75,10 +104,10 @@ class TokenAuthenticatorTest extends TestCase
 
         $authenticator = new TokenAuthenticator($config);
 
-        $clientB = $authenticator->authenticate('token-bbb');
+        $clientB = $authenticator->authenticate($this->makeRequest('token-bbb'));
         $this->assertSame('client-b', $clientB->name);
 
-        $clientA = $authenticator->authenticate('token-aaa');
+        $clientA = $authenticator->authenticate($this->makeRequest('token-aaa'));
         $this->assertSame('client-a', $clientA->name);
     }
 }

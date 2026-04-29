@@ -8,6 +8,7 @@ use App\Backend\DecryptionBackendInterface;
 use App\Config\AgentConfig;
 use App\Config\ClientConfig;
 use App\Controller\DecryptController;
+use App\Exception\AuthenticationException;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlService;
 use App\Security\TokenAuthenticator;
@@ -75,32 +76,29 @@ class DecryptControllerTest extends TestCase
         $this->assertSame(base64_encode($plaintext), $body['decrypted_data']);
     }
 
-    public function testDecryptPassesLabelToBackend(): void
+    public function testDecryptThrowsOnMissingAuthorizationHeader(): void
     {
-        $backend = $this->createMock(DecryptionBackendInterface::class);
-        $backend->expects($this->once())
-            ->method('decrypt')
-            ->with(
-                $this->anything(),
-                'rsa-pkcs1-oaep-mgf1-sha256',
-                'my-label',
-            )
-            ->willReturn('data');
-        $backend->method('getName')->willReturn('my-key');
-        $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
-
         $request = new Request(
             content: (string) json_encode([
-                'algorithm' => 'rsa-pkcs1-oaep-mgf1-sha256',
+                'algorithm' => 'rsa-pkcs1-v1_5',
                 'encrypted_data' => base64_encode(random_bytes(256)),
-                'label' => base64_encode('my-label'),
             ]),
         );
+        $request->headers->set('Content-Type', 'application/json');
+
+        $this->expectException(AuthenticationException::class);
+        $this->controller->decrypt($request, 'my-key');
+    }
+
+    public function testDecryptThrowsOnNonArrayJsonBody(): void
+    {
+        $request = new Request(content: '"just a string"');
         $request->headers->set('Authorization', 'Bearer test-token');
         $request->headers->set('Content-Type', 'application/json');
 
-        $response = $this->controller->decrypt($request, 'my-key');
-        $this->assertSame(200, $response->getStatusCode());
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('Invalid JSON body');
+        $this->controller->decrypt($request, 'my-key');
     }
 
     public function testDecryptReturns400OnInvalidBody(): void

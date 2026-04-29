@@ -91,7 +91,7 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         return $signature;
     }
 
-    public function decrypt(string $ciphertext, string $algorithm, string|null $label = null): string
+    public function decrypt(string $ciphertext, string $algorithm): string
     {
         if (strlen($ciphertext) !== $this->modulusBytes) {
             throw new InvalidRequestException(sprintf(

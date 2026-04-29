@@ -51,6 +51,10 @@ final class ConfigLoader
             throw new InvalidConfigurationException('Config must contain a non-empty string agent_name');
         }
 
+        if (isset($data['keys']) && ! is_array($data['keys'])) {
+            throw new InvalidConfigurationException('Config "keys" must be a YAML sequence');
+        }
+
         if (! isset($data['clients']) || ! is_array($data['clients']) || count($data['clients']) === 0) {
             throw new InvalidConfigurationException('At least one client must be configured');
         }
@@ -67,6 +71,10 @@ final class ConfigLoader
         $seenNames = [];
 
         foreach ($keysData as $keyData) {
+            if (! is_array($keyData)) {
+                throw new InvalidConfigurationException('Each entry under "keys" must be a YAML mapping');
+            }
+
             $name = $keyData['name'] ?? throw new InvalidConfigurationException('Key must have a name');
 
             if (isset($seenNames[$name])) {
@@ -112,6 +120,10 @@ final class ConfigLoader
     {
         $clients = [];
         foreach ($clientsData as $clientData) {
+            if (! is_array($clientData)) {
+                throw new InvalidConfigurationException('Each entry under "clients" must be a YAML mapping');
+            }
+
             $name  = $clientData['name'] ?? throw new InvalidConfigurationException('Client must have a name');
             $token = $clientData['token'] ?? throw new InvalidConfigurationException(sprintf('Client "%s" must have a token', $name));
 

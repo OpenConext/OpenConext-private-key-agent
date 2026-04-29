@@ -155,4 +155,128 @@ YAML;
             unlink($tmpFile);
         }
     }
+
+    public function testLoadThrowsOnNonArrayKeys(): void
+    {
+        $yaml    = "agent_name: test-agent\nkeys: bad-string\nclients:\n  - name: c1\n    token: test-token-value-at-least-32-chars-long\n    allowed_keys: []\n";
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"keys"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnScalarKeyEntry(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - bad-scalar-entry
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"keys"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnScalarClientEntry(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys: []
+clients:
+  - bad-scalar-entry
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"clients"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingKeyName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Key must have a name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingClientName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys: []
+clients:
+  - token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Client must have a name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingClientToken(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys: []
+clients:
+  - name: c1
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('token');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
 }

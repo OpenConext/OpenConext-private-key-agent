@@ -11,6 +11,6 @@ class AuthenticationException extends RuntimeException
 {
     public function __construct(string $message = 'Authentication required', Throwable|null $previous = null)
     {
-        parent::__construct($message, 401, $previous);
+        parent::__construct($message, previous: $previous);
     }
 }
