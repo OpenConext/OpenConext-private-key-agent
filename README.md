@@ -17,7 +17,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 | Operation | Client sends | Agent returns |
 |---|---|---|
 | `POST /sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
-| `POST /decrypt/{key_name}` | Base64-encoded ciphertext + algorithm (+ optional OAEP label) | Base64-encoded plaintext (symmetric key) |
+| `POST /decrypt/{key_name}` | Base64-encoded `encrypted_data` + algorithm | Base64-encoded `decrypted_data` (symmetric key) |
 | `GET /health` | — | Overall health status |
 | `GET /health/key/{key_name}` | — | Per-key health status |
 
@@ -258,7 +258,7 @@ Runs everything the CI pipeline checks, in order:
 docker compose exec app composer check
 ```
 
-This executes: `phplint` → `phpstan` → `composer audit` → `phpunit`.
+This executes: `phplint` → `phpstan` → `phpcs` → `composer audit` → `phpunit`.
 
 ### Smoke tests — test-endpoints.sh
 
@@ -382,7 +382,7 @@ When SimpleSAMLphp signs a SAML Response:
 When SimpleSAMLphp decrypts an encrypted SAML Assertion:
 
 1. `xml-security` extracts the RSA-encrypted session key from `xenc:CipherValue` and calls `EncryptionBackend::decrypt($key, $ciphertext)` with those bytes.
-2. The adapter calls `POST /decrypt/{key_name}` with the Base64-encoded ciphertext and algorithm.
+2. The adapter calls `POST /decrypt/{key_name}` with the Base64-encoded `encrypted_data` and `algorithm`.
 3. The agent RSA-decrypts the session key and returns it.
 4. `xml-security` uses the session key to AES-decrypt the assertion content.
 
@@ -415,7 +415,9 @@ class PrivateKeyAgentSignatureBackend implements SignatureBackend
         return base64_decode($response['signature']);
     }
 
-    // … HTTP helper, EncryptionBackend adapter follows the same pattern
+    // … HTTP helper; EncryptionBackend adapter follows the same pattern:
+    // send { "algorithm": $algorithm, "encrypted_data": $base64Ciphertext }
+    // and decode $response['decrypted_data'] to recover the symmetric key.
 }
 ```
 
