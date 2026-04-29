@@ -10,6 +10,7 @@ use App\Exception\AuthenticationException;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
 use App\Exception\KeyNotFoundException;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
@@ -24,7 +25,7 @@ final class ExceptionSubscriber implements EventSubscriberInterface
 {
     private readonly string $realm;
 
-    public function __construct(AgentConfig $config)
+    public function __construct(AgentConfig $config, private readonly LoggerInterface $logger)
     {
         $this->realm = $config->agentName;
     }
@@ -51,6 +52,12 @@ final class ExceptionSubscriber implements EventSubscriberInterface
             $exception instanceof BackendException             => [500, 'server_error', 'A backend operation failed'],
             default                                            => [500, 'server_error', 'Internal server error'],
         };
+
+        if ($exception instanceof AuthenticationException || $exception instanceof AccessDeniedException) {
+            $this->logger->warning($exception->getMessage());
+        } elseif ($exception instanceof BackendException || $status === 500) {
+            $this->logger->error($exception->getMessage());
+        }
 
         $response = new JsonResponse([
             'status' => $status,

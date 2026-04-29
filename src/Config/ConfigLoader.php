@@ -12,9 +12,11 @@ use function array_unique;
 use function array_values;
 use function count;
 use function file_exists;
+use function gettype;
 use function implode;
 use function is_array;
 use function is_string;
+use function preg_match;
 use function sprintf;
 
 final class ConfigLoader
@@ -55,6 +57,10 @@ final class ConfigLoader
             throw new InvalidConfigurationException('Config "keys" must be a YAML sequence');
         }
 
+        if (empty($data['keys'])) {
+            throw new InvalidConfigurationException('At least one key must be configured');
+        }
+
         if (! isset($data['clients']) || ! is_array($data['clients']) || count($data['clients']) === 0) {
             throw new InvalidConfigurationException('At least one client must be configured');
         }
@@ -76,6 +82,13 @@ final class ConfigLoader
             }
 
             $name = $keyData['name'] ?? throw new InvalidConfigurationException('Key must have a name');
+
+            if (! is_string($name) || ! preg_match('/^' . KeyName::PATTERN . '$/', $name)) {
+                throw new InvalidConfigurationException(sprintf(
+                    'Key name must match ' . KeyName::PATTERN . ', got: %s',
+                    is_string($name) ? $name : gettype($name),
+                ));
+            }
 
             if (isset($seenNames[$name])) {
                 throw new InvalidConfigurationException(sprintf('Duplicate key name: %s', $name));
@@ -118,23 +131,51 @@ final class ConfigLoader
      */
     private static function parseClients(array $clientsData): array
     {
-        $clients = [];
+        $clients   = [];
+        $seenNames = [];
+
         foreach ($clientsData as $clientData) {
             if (! is_array($clientData)) {
                 throw new InvalidConfigurationException('Each entry under "clients" must be a YAML mapping');
             }
 
-            $name  = $clientData['name'] ?? throw new InvalidConfigurationException('Client must have a name');
+            $name = $clientData['name'] ?? throw new InvalidConfigurationException('Client must have a name');
+
+            if (! is_string($name) || $name === '') {
+                throw new InvalidConfigurationException('Client name must be a non-empty string');
+            }
+
+            if (isset($seenNames[$name])) {
+                throw new InvalidConfigurationException(sprintf('Duplicate client name: %s', $name));
+            }
+
+            $seenNames[$name] = true;
+
             $token = $clientData['token'] ?? throw new InvalidConfigurationException(sprintf('Client "%s" must have a token', $name));
 
             if (! is_string($token) || $token === '') {
                 throw new InvalidConfigurationException(sprintf('Client "%s" token must be a non-empty string', $name));
             }
 
+            $allowedKeys = $clientData['allowed_keys'] ?? null;
+
+            if ($allowedKeys === null || ! is_array($allowedKeys) || count($allowedKeys) === 0) {
+                throw new InvalidConfigurationException(sprintf('Client "%s" allowed_keys must be a non-empty list', $name));
+            }
+
+            foreach ($allowedKeys as $entry) {
+                if (! is_string($entry) || $entry === '') {
+                    throw new InvalidConfigurationException(sprintf(
+                        'Client "%s" allowed_keys entries must be non-empty strings',
+                        $name,
+                    ));
+                }
+            }
+
             $clients[] = new ClientConfig(
                 name: $name,
                 token: $token,
-                allowedKeys: $clientData['allowed_keys'] ?? [],
+                allowedKeys: array_values($allowedKeys),
             );
         }
 

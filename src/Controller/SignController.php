@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\KeyName;
 use App\Dto\SignRequest;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlInterface;
@@ -33,7 +34,7 @@ final class SignController
     ) {
     }
 
-    #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'])]
+    #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
     public function sign(Request $request, string $keyName): JsonResponse
     {
         $client = $this->authenticator->authenticate($request);

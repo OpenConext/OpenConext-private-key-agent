@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\KeyName;
 use App\Service\KeyRegistryInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -43,7 +44,7 @@ final class HealthController
         return new JsonResponse(['status' => 'OK']);
     }
 
-    #[Route('/health/key/{keyName}', name: 'health_key', methods: ['GET'])]
+    #[Route('/health/key/{keyName}', name: 'health_key', methods: ['GET'], requirements: ['keyName' => KeyName::PATTERN])]
     public function keyHealth(string $keyName): JsonResponse
     {
         $backend = $this->keyRegistry->findBackend($keyName);

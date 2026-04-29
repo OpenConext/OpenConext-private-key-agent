@@ -11,7 +11,9 @@ use App\Exception\AuthenticationException;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
 use App\Exception\KeyNotFoundException;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
@@ -25,6 +27,7 @@ class ExceptionSubscriberTest extends TestCase
 {
     private ExceptionSubscriber $subscriber;
     private HttpKernelInterface $kernel;
+    private LoggerInterface&MockObject $logger;
 
     protected function setUp(): void
     {
@@ -33,7 +36,8 @@ class ExceptionSubscriberTest extends TestCase
             keys: [],
             clients: [],
         );
-        $this->subscriber = new ExceptionSubscriber($config);
+        $this->logger     = $this->createMock(LoggerInterface::class);
+        $this->subscriber = new ExceptionSubscriber($config, $this->logger);
         $this->kernel     = $this->createMock(HttpKernelInterface::class);
     }
 
@@ -208,5 +212,53 @@ class ExceptionSubscriberTest extends TestCase
         $body = json_decode((string) $response->getContent(), true);
         $this->assertSame('server_error', $body['error']);
         $this->assertSame('Internal server error', $body['message']);
+    }
+
+    public function testAuthenticationExceptionLogsWarning(): void
+    {
+        $this->logger->expects($this->once())
+            ->method('warning')
+            ->with('Invalid bearer token');
+
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new AuthenticationException('Invalid bearer token'),
+        );
+
+        $this->subscriber->onKernelException($event);
+    }
+
+    public function testAccessDeniedExceptionLogsWarning(): void
+    {
+        $this->logger->expects($this->once())
+            ->method('warning')
+            ->with('Client "sp" is not allowed to access key "signing-key"');
+
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new AccessDeniedException('Client "sp" is not allowed to access key "signing-key"'),
+        );
+
+        $this->subscriber->onKernelException($event);
+    }
+
+    public function testBackendExceptionLogsError(): void
+    {
+        $this->logger->expects($this->once())
+            ->method('error')
+            ->with('OpenSSL signing failed for key "k": unknown error');
+
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new BackendException('OpenSSL signing failed for key "k": unknown error'),
+        );
+
+        $this->subscriber->onKernelException($event);
     }
 }

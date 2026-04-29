@@ -198,7 +198,10 @@ YAML;
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-keys: []
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - bad-scalar-entry
 YAML;
@@ -242,10 +245,13 @@ YAML;
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-keys: []
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - token: test-token-value-at-least-32-chars-long
-    allowed_keys: []
+    allowed_keys: [k1]
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
@@ -263,10 +269,13 @@ YAML;
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-keys: []
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - name: c1
-    allowed_keys: []
+    allowed_keys: [k1]
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
@@ -275,6 +284,200 @@ YAML;
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('token');
             ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('At least one key must be configured');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnEmptyKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys: []
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('At least one key must be configured');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnInvalidKeyName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: "invalid key!"
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('[a-zA-Z0-9_-]{1,64}');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnDuplicateClientNames(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: sp
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+  - name: sp
+    token: another-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Duplicate client name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnEmptyAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys must be a non-empty list');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys must be a non-empty list');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnNonStringAllowedKeyEntry(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [123]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys entries must be non-empty strings');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadValidConfigWithWildcardAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: ["*"]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $config = ConfigLoader::load($tmpFile);
+            $this->assertSame(['*'], $config->clients[0]->allowedKeys);
         } finally {
             unlink($tmpFile);
         }

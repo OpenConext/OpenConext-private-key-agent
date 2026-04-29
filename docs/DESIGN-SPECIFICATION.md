@@ -134,7 +134,7 @@ A raw RSA operation was considered but rejected because it pushes all padding re
 
 For RSA PKCS#1 v1.5 decryption, the agent returns the decrypted value (the symmetric key when used with `http://www.w3.org/2001/04/xmlenc#rsa-1_5`). The client uses this key to decrypt the actual data.
 
-For RSA PKCS#1 OAEP decryption, additional parameters are needed: the MGF1 hash algorithm and an optional OAEP label. The label is not typically used in XML Encryption.
+For RSA PKCS#1 OAEP decryption, the MGF1 hash algorithm is specified via the algorithm identifier. No OAEP label parameter is supported; the label is not used in XML Encryption.
 
 ---
 
@@ -210,14 +210,11 @@ Content-Type: application/json
 ```json
 {
   "algorithm": "rsa-pkcs1-v1_5",
-  "encrypted_data": "<Base64-encoded ciphertext>",
-  "label": "<Base64-encoded OAEP label, optional>"
+  "encrypted_data": "<Base64-encoded ciphertext>"
 }
 ```
 
 Supported algorithms: `rsa-pkcs1-v1_5`, `rsa-pkcs1-oaep-mgf1-sha1`, `rsa-pkcs1-oaep-mgf1-sha224`, `rsa-pkcs1-oaep-mgf1-sha256`, `rsa-pkcs1-oaep-mgf1-sha384`, `rsa-pkcs1-oaep-mgf1-sha512`
-
-The `label` field is only relevant for OAEP algorithms and is not typically used in XML Encryption.
 
 Response `200`:
 
@@ -243,7 +240,7 @@ Response `503`:
 {
   "status": 503,
   "error": "server_error",
-  "message": "One or more backends are unhealthy",
+  "message": "One or more keys are unhealthy",
   "unhealthy_keys": ["dev-signing-key"]
 }
 ```
@@ -266,7 +263,7 @@ Response `503`:
 {
   "status": 503,
   "error": "server_error",
-  "message": "Backend is unhealthy",
+  "message": "Key is unhealthy",
   "key_name": "dev-signing-key"
 }
 ```
@@ -410,7 +407,7 @@ classDiagram
     }
     class DecryptionBackendInterface {
         <<interface>>
-        +decrypt(ciphertext, algorithm, label) string
+        +decrypt(ciphertext, algorithm) string
     }
     BackendInterface <|-- SigningBackendInterface
     BackendInterface <|-- DecryptionBackendInterface
@@ -576,7 +573,7 @@ interface SigningBackendInterface extends BackendInterface
 
 interface DecryptionBackendInterface extends BackendInterface
 {
-    public function decrypt(string $ciphertext, string $algorithm, string|null $label = null): string;
+    public function decrypt(string $ciphertext, string $algorithm): string;
 }
 ```
 
@@ -609,7 +606,7 @@ interface DecryptionBackendInterface extends BackendInterface
 ```php
 final class SignRequest
 {
-    public const array ALGORITHMS = [
+    private const array ALGORITHMS = [
         'rsa-pkcs1-v1_5-sha1',
         'rsa-pkcs1-v1_5-sha256',
         'rsa-pkcs1-v1_5-sha384',
@@ -666,16 +663,8 @@ final class SignRequest
 ```php
 final class DecryptRequest
 {
-    public const array ALGORITHMS = [
+    private const array ALGORITHMS = [
         'rsa-pkcs1-v1_5',
-        'rsa-pkcs1-oaep-mgf1-sha1',
-        'rsa-pkcs1-oaep-mgf1-sha224',
-        'rsa-pkcs1-oaep-mgf1-sha256',
-        'rsa-pkcs1-oaep-mgf1-sha384',
-        'rsa-pkcs1-oaep-mgf1-sha512',
-    ];
-
-    private const array OAEP_ALGORITHMS = [
         'rsa-pkcs1-oaep-mgf1-sha1',
         'rsa-pkcs1-oaep-mgf1-sha224',
         'rsa-pkcs1-oaep-mgf1-sha256',
@@ -689,11 +678,7 @@ final class DecryptRequest
 
     #[Assert\NotBlank]
     #[Assert\Base64]
-    #[SerializedName('encrypted_data')]
     public string $encryptedData = '';
-
-    #[Assert\Base64]
-    public string|null $label = null;
 
     #[Assert\Callback]
     public function validateRequest(ExecutionContextInterface $context): void
@@ -714,14 +699,6 @@ final class DecryptRequest
                 }
             }
         }
-
-        // label is only meaningful for OAEP algorithms
-        if ($this->label === null || in_array($this->algorithm, self::OAEP_ALGORITHMS, true)) {
-            return;
-        }
-        $context->buildViolation('Label is only allowed for OAEP algorithms.')
-            ->atPath('label')
-            ->addViolation();
     }
 }
 ```
@@ -808,11 +785,11 @@ The test suite is split into two directories with different infrastructure requi
 
 All services, controllers, authenticator, exception subscriber, DTOs, config loader, command, and validators are tested with PHPUnit using mocks or pure PHP. No cryptographic operations are performed and no key material is required. These tests run on any standard PHP environment and are always part of the main CI pipeline.
 
-Unit test coverage includes: `BackendFactory`, `OpenSslBackendTypeFactory`, `ValidateConfigCommand`, `ConfigLoader`, `DecryptController`, `HealthController`, `SignController`, `DigestInfoBuilder`, `DecryptRequest`, `SignRequest`, `ExceptionSubscriber`, `AccessControlService`, `TokenAuthenticator`, `KeyRegistryBootstrapper`, `KeyRegistry`, `Base64Validator`.
+Unit test coverage includes: `ValidateConfigCommand`, `ConfigLoader`, `ConfigProvider`, `DecryptController`, `HealthController`, `SignController`, `DigestInfoBuilder`, `DecryptRequest`, `SignRequest`, `ExceptionSubscriber`, `AccessControlService`, `TokenAuthenticator`, `KeyRegistryBootstrapper`, `KeyRegistry`, `Base64Validator`.
 
 ### Integration tests (`tests/Integration/`)
 
-`OpenSslSigningBackend` and `OpenSslDecryptionBackend` are tested against real RSA private key operations.
+`OpenSslBackend` is tested against real RSA private key operations.
 
 These tests have no external dependencies — a test key pair is generated at the start of the test run. They run in the main CI pipeline alongside the unit tests.
 

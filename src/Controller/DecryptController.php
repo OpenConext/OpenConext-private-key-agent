@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\KeyName;
 use App\Dto\DecryptRequest;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlInterface;
@@ -33,7 +34,7 @@ final class DecryptController
     ) {
     }
 
-    #[Route('/decrypt/{keyName}', name: 'decrypt', methods: ['POST'])]
+    #[Route('/decrypt/{keyName}', name: 'decrypt', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
     public function decrypt(Request $request, string $keyName): JsonResponse
     {
         $client = $this->authenticator->authenticate($request);
