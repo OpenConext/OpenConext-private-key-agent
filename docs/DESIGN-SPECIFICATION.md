@@ -160,7 +160,7 @@ For RSA PKCS#1 OAEP decryption, additional parameters are needed: the MGF1 hash 
 
 ### Authentication
 
-All endpoints except `/health` and `/health/backend/{backend_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `token` values in the configuration using `hash_equals()` to prevent timing attacks.
+All endpoints except `/health` and `/health/key/{key_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `token` values in the configuration using `hash_equals()` to prevent timing attacks.
 
 > **This is a static pre-shared bearer token scheme, not OAuth 2.0 client credentials.**
 >
@@ -244,20 +244,20 @@ Response `503`:
   "status": 503,
   "error": "server_error",
   "message": "One or more backends are unhealthy",
-  "unhealthy_backends": ["openssl-signing"]
+  "unhealthy_keys": ["dev-signing-key"]
 }
 ```
 
-### `GET /health/backend/{backend_name}`
+### `GET /health/key/{key_name}`
 
-No authentication required. The `backend_name` path parameter must match the `name` field of a configured `backend_groups` entry (e.g. `openssl-signing`).
+No authentication required. The `key_name` path parameter must match a configured key name.
 
-Returns `200` if all instances of the named backend are healthy, `503` if any instance is unhealthy, `404` if no backend with that name is registered.
+Returns `200` if the named key's backend is healthy, `503` if unhealthy, `404` if no key with that name is registered.
 
 Response `200`:
 
 ```json
-{ "status": "OK", "backend_name": "openssl-signing" }
+{ "status": "OK", "key_name": "dev-signing-key" }
 ```
 
 Response `503`:
@@ -267,7 +267,7 @@ Response `503`:
   "status": 503,
   "error": "server_error",
   "message": "Backend is unhealthy",
-  "backend_name": "openssl-signing"
+  "key_name": "dev-signing-key"
 }
 ```
 
@@ -276,13 +276,11 @@ Response `404`:
 ```json
 {
   "status": "not_found",
-  "backend_name": "unknown-name"
+  "key_name": "unknown-name"
 }
 ```
 
-Health check behaviour per backend type:
-
-- **OpenSSL**: healthy if the key(s) loaded successfully at boot (checked statically, no runtime probe)
+Health check behaviour: the OpenSSL backend returns `true` from `isHealthy()` if the key loaded successfully at boot (checked statically, no runtime probe).
 
 ### Error Responses
 
@@ -306,9 +304,10 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 
 | HTTP Status | Error Code | Cause |
 |---|---|---|
-| 400 | `invalid_request` | Missing or invalid request parameter, or key not registered for the requested operation |
+| 400 | `invalid_request` | Missing or invalid request parameter |
 | 401 | `invalid_token` | Missing or invalid bearer token |
 | 403 | `access_denied` | Client not permitted to use the key |
+| 404 | `not_found` | Key not registered or operation not permitted for key |
 | 500 | `server_error` | Backend failure (OpenSSL error) |
 
 ---
@@ -330,17 +329,14 @@ Values inside the config file (e.g. `token`) are plain strings — `ConfigLoader
 ```yaml
 agent_name: my-private-key-agent
 
-backend_groups:
-  - name: software-backend
-    type: openssl
-    key_path: /etc/private-key-agent/keys/signing.pem
-
 keys:
   - name: my-signing-key
-    signing_backends:
-      - software-backend
-    decryption_backends:
-      - software-backend
+    key_path: /etc/private-key-agent/keys/signing.pem
+    operations: [sign]
+
+  - name: my-decryption-key
+    key_path: /etc/private-key-agent/keys/decryption.pem
+    operations: [decrypt]
 
 clients:
   - name: simplesamlphp
@@ -355,26 +351,13 @@ clients:
 
 - `agent_name`: The name of this agent. Used in `WWW-Authenticate` response headers as the `realm` value.
 
-#### Backend Groups
-
-Each entry in `backend_groups` represents a single cryptographic backend holding exactly one private key. Keys (defined in the `keys` section) reference one or more backend groups by name, forming a logical key identity that can be served by multiple backends for round-robin load distribution.
-
-- `name`: Unique name for the backend group. Referenced from key `signing_backends` / `decryption_backends`.
-- `type`: `openssl`.
-
-OpenSSL-specific options:
-
-- `key_path`: Path to a PEM private key file. Only RSA keys are supported; the backend validates at startup that the loaded key is RSA and throws a `BackendException` otherwise.
-
 #### Keys
 
-Each entry in `keys` defines a logical key identity that clients can reference. A key maps operations to one or more backend groups, decoupling the logical key name from the physical backend. This allows distributing load across multiple backends holding the same key material.
+Each entry in `keys` defines a logical key identity backed by a single PEM file. Clients reference keys by name. The `operations` list controls which cryptographic operations are permitted for this key.
 
-- `name`: Logical key name. Used by clients in the request `key_name` field and in `allowed_keys`. Must be unique.
-- `signing_backends`: List of backend group `name` values that handle signing for this key. Multiple entries enable round-robin distribution across backends.
-- `decryption_backends`: List of backend group `name` values that handle decryption for this key. Multiple entries enable round-robin distribution across backends.
-
-**Round-robin high availability:** when multiple backend groups are listed for an operation, the agent cycles through them on successive requests. All backend groups listed for the same operation should hold the same private key material.
+- `name`: Logical key name. Used by clients in the request `key_name` field and in `allowed_keys`. Must be unique and match `[a-zA-Z0-9_-]{1,64}`.
+- `key_path`: Path to a PEM private key file. Only RSA keys are supported; the backend validates at startup that the loaded key is RSA and throws a `BackendException` otherwise.
+- `operations`: Non-empty list of permitted operations for this key. Valid values: `sign`, `decrypt`.
 
 #### Client
 
@@ -394,16 +377,16 @@ Each entry in `keys` defines a logical key identity that clients can reference. 
 | `config/` | Symfony configuration: routing, service wiring, and package configs (monolog, nelmio, security) |
 | `docker/` | Docker build artefacts: multi-stage `Dockerfile` and PHP ini files |
 | `public/` | Web root: `index.php` (Apache entry point) |
-| `src/Backend/` | OpenSSL backend implementations, backend factory, and backend interfaces |
+| `src/Backend/` | OpenSSL backend implementation and backend interfaces |
 | `src/Command/` | Symfony console commands; currently `ValidateConfigCommand` for offline configuration validation |
-| `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, backend group, key, and client configuration |
+| `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, key, and client configuration |
 | `src/Controller/` | REST API controllers: `SignController`, `DecryptController`, `HealthController` |
 | `src/Crypto/` | Low-level cryptographic utilities; currently `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing) |
 | `src/Dto/` | Request data transfer objects (`SignRequest`, `DecryptRequest`) with Symfony validation constraints |
 | `src/EventSubscriber/` | `ExceptionSubscriber` maps domain exceptions to RFC 6750 HTTP error responses |
 | `src/Exception/` | Domain exception hierarchy (`AuthenticationException`, `AccessDeniedException`, `BackendException`, `InvalidRequestException`, `InvalidConfigurationException`) |
 | `src/Security/` | Authentication (`TokenAuthenticator`) and key-level access control (`AccessControlService`) |
-| `src/Service/` | Key registry (`KeyRegistry`, `KeyRegistryBootstrapper`, `KeyRegistryInterface`) — maps logical key names to backend instances with round-robin distribution |
+| `src/Service/` | Key registry (`KeyRegistry`, `KeyRegistryBootstrapper`, `KeyRegistryInterface`) — maps logical key names to backend instances |
 | `src/Validator/` | Custom Symfony validation constraint (`Base64`, `Base64Validator`) |
 | `tests/Unit/` | Unit tests using mocks; no I/O or cryptographic operations required |
 | `tests/Integration/` | Integration tests for the OpenSSL backends against real key material |
@@ -420,7 +403,6 @@ classDiagram
         <<interface>>
         +getName() string
         +isHealthy() bool
-        +getPublicKeyFingerprint() string
     }
     class SigningBackendInterface {
         <<interface>>
@@ -433,26 +415,28 @@ classDiagram
     BackendInterface <|-- SigningBackendInterface
     BackendInterface <|-- DecryptionBackendInterface
 
-    class OpenSslSigningBackend
-    class OpenSslDecryptionBackend
-    SigningBackendInterface <|.. OpenSslSigningBackend
-    DecryptionBackendInterface <|.. OpenSslDecryptionBackend
+    class OpenSslBackend
+    SigningBackendInterface <|.. OpenSslBackend
+    DecryptionBackendInterface <|.. OpenSslBackend
 
     class DigestInfoBuilder {
         <<utility>>
         +build(algorithm, hash) string
     }
-    OpenSslSigningBackend --> DigestInfoBuilder
+    OpenSslBackend --> DigestInfoBuilder
 
     class KeyRegistryInterface {
         <<interface>>
         +getSigningBackend(keyName) SigningBackendInterface
         +getDecryptionBackend(keyName) DecryptionBackendInterface
+        +getAllBackends() list
+        +findBackend(keyName) BackendInterface
     }
     class KeyRegistry {
         +getSigningBackend(keyName) SigningBackendInterface
         +getDecryptionBackend(keyName) DecryptionBackendInterface
         +getAllBackends() list
+        +findBackend(keyName) BackendInterface
     }
     KeyRegistryInterface <|.. KeyRegistry
     class KeyRegistryBootstrapper {
@@ -460,16 +444,10 @@ classDiagram
     }
     KeyRegistryBootstrapper --> KeyRegistry : populates
 
-    class BackendFactory {
-        +build() map
-    }
-    BackendFactory --> KeyRegistryBootstrapper
-    BackendFactory ..> BackendInterface : creates
-
     class ConfigProvider {
         +getConfig() AgentConfig
     }
-    BackendFactory --> ConfigProvider
+    KeyRegistryBootstrapper --> ConfigProvider
 
     class TokenAuthenticator {
         +authenticate(token) ClientConfig
@@ -509,38 +487,25 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 **Structural / required fields:**
 
 - `agent_name`: required, non-empty string.
-- At least one backend group defined in `backend_groups`.
-- `name`: required per backend group; **unique across all backend groups**.
-- `type`: required; must be `openssl`.
-- OpenSSL: `key_path` required.
 - At least one key defined in `keys`.
 - `name`: required per key; must match `[a-zA-Z0-9_-]{1,64}`; **unique within keys**.
+- `key_path`: required per key.
+- `operations`: required per key; non-empty list; each value must be `sign` or `decrypt`.
 - At least one client defined in `clients`.
 - `name`: required per client; **unique across all clients**.
 - `token`: required; **must be non-empty** (an empty token would authenticate blank-token requests — security issue).
 - `allowed_keys`: required; non-empty list.
 
-**Semantic / cross-reference checks:**
-
-- Every backend group referenced by a key's `signing_backends` or `decryption_backends` list must match a `name` defined in `backend_groups`. Orphaned backend references are rejected here rather than at request time.
-- Every backend group defined in `backend_groups` must be referenced by at least one key (`validateNoOrphanBackends`). An unreferenced backend group is treated as a configuration error.
-
 > `ValidateConfigCommand` reuses `ConfigLoader` for all of the above. Successful parsing means the config is structurally valid; it does not open key files or validate key accessibility.
 
-> **RSA-only enforcement:** Only RSA private keys are currently supported. OpenSSL backends validate this at construction time (checking for an RSA modulus in the key details). A non-RSA key causes immediate failure with a `BackendException`.
-
-### `BackendFactory`
-
-Responsible for instantiating all backend objects at boot. Delegates per-type construction to `BackendTypeFactoryInterface` implementations (`OpenSslBackendTypeFactory`). Returns a map of backend group name → `BackendInterface`. After building all backends, passes the map to `KeyRegistryBootstrapper` to populate `KeyRegistry`.
+> **RSA-only enforcement:** Only RSA private keys are currently supported. The OpenSSL backend validates this at construction time (checking for an RSA modulus in the key details). A non-RSA key causes immediate failure with a `BackendException`.
 
 ### `KeyRegistry` / `KeyRegistryBootstrapper`
 
-- `KeyRegistryBootstrapper` is invoked at boot from `AgentConfig` (via `BackendFactory`) and populates the `KeyRegistry` with resolved `SigningBackendInterface` and `DecryptionBackendInterface` instances.
-- `KeyRegistry` holds two separate maps: one for signing backends (key name → list of `SigningBackendInterface`) and one for decryption backends (key name → list of `DecryptionBackendInterface`).
+- `KeyRegistryBootstrapper` is invoked at boot and populates `KeyRegistry` by reading `KeyConfig` objects from `AgentConfig`. For each key, it creates an `OpenSslBackend` instance and registers it with the allowed operations.
+- `KeyRegistry` holds a single map of key name → `OpenSslBackend` and a map of key name → permitted operations.
 - Provides `getSigningBackend(string $keyName): SigningBackendInterface` and `getDecryptionBackend(string $keyName): DecryptionBackendInterface` methods.
-- If a key name is not registered for the requested operation, the registry throws `InvalidRequestException` (→ 400).
-- Implements round-robin selection across backends for a given key name using per-instance counter arrays (`$signingCounters`, `$decryptionCounters`).
-- **Lazy key equivalence check**: on the first request for a given `key_name` that maps to multiple backends, asserts all `getPublicKeyFingerprint()` values are identical. Throws `InvalidConfigurationException` if any mismatch is detected, logging the offending key name and the differing fingerprints.
+- If a key name is not registered, or is not registered for the requested operation, the registry throws `KeyNotFoundException` (→ 404).
 
 ### `TokenAuthenticator`
 
@@ -564,6 +529,7 @@ Responsible for instantiating all backend objects at boot. Delegates per-type co
   - `InvalidRequestException` → 400
   - `AuthenticationException` → 401 + `WWW-Authenticate` header
   - `AccessDeniedException` → 403
+  - `KeyNotFoundException` → 404
   - `BackendException` → 500
   - Unhandled exceptions → 500
 
@@ -587,7 +553,20 @@ interface BackendInterface
      * Used lazily to verify that all backends sharing a key_name hold the same key.
      * The fingerprint is not secret and may be logged.
      */
-    public function getPublicKeyFingerprint(): string;
+### Backend Interfaces
+
+```php
+interface BackendInterface
+{
+    /**
+     * Returns the key name (as configured in YAML).
+     */
+    public function getName(): string;
+
+    /**
+     * Returns true if the backend is operational (key loaded successfully, etc.).
+     */
+    public function isHealthy(): bool;
 }
 
 interface SigningBackendInterface extends BackendInterface
@@ -601,37 +580,12 @@ interface DecryptionBackendInterface extends BackendInterface
 }
 ```
 
-**`getPublicKeyFingerprint()` implementation:**
+### `OpenSslBackend`
 
-- **OpenSSL backends**: `hash('sha256', openssl_pkey_get_details($key)['rsa']['n'])` — `$key['rsa']['n']` is the binary modulus returned by `openssl_pkey_get_details()`.
-
-### `DigestInfoBuilder`
-
-Shared utility (no state, static methods) used by the signing backend. Prepends the correct DER-encoded DigestInfo prefix for the given algorithm to the provided hash bytes, producing the structure that `openssl_private_encrypt()` expects.
-
-The DER prefixes are well-known constants from RFC 3447 §9.2 / PKCS#1:
-
-| Algorithm | Prefix (hex) | Hash length |
-|---|---|---|
-| SHA-1 | `3021300906052b0e03021a05000414` | 20 |
-| SHA-256 | `3031300d060960864801650304020105000420` | 32 |
-| SHA-384 | `3041300d060960864801650304020205000430` | 48 |
-| SHA-512 | `3051300d060960864801650304020305000440` | 64 |
-
-`DigestInfoBuilder` is unit-tested independently using hardcoded input/output pairs, in addition to being implicitly validated by the OpenSSL integration tests which verify signatures against the public key.
-
-### `OpenSslSigningBackend`
-
-- Loads the PEM private key (with optional passphrase) at construction time.
-- Constructs the DigestInfo ASN.1 structure internally by delegating to `DigestInfoBuilder`.
-- Signs using `openssl_private_encrypt()` with `OPENSSL_PKCS1_PADDING` on the DigestInfo-wrapped hash.
-- `isHealthy()` returns `true` if the key loaded successfully at boot.
-
-### `OpenSslDecryptionBackend`
-
-- Loads the PEM private key at construction time.
-- Maps algorithm string to the appropriate `openssl_private_decrypt()` padding constant and `digest_algo` value (PHP 8.5+).
-- For OAEP algorithms, passes the hash algorithm name via the `digest_algo` parameter added in PHP 8.5. Prior to PHP 8.5, only `rsa-pkcs1-oaep-mgf1-sha1` would be supportable with the OpenSSL backend.
+- Loads the PEM private key at construction time; throws `BackendException` immediately if the key is invalid or not RSA.
+- Implements both `SigningBackendInterface` and `DecryptionBackendInterface`.
+- Signing: delegates to `DigestInfoBuilder` to prepend the DER-encoded DigestInfo prefix, then calls `openssl_private_encrypt()` with `OPENSSL_PKCS1_PADDING`.
+- Decryption: maps algorithm string to the appropriate `openssl_private_decrypt()` padding constant and optional `digest_algo` value (PHP 8.5+). For OAEP algorithms, passes the hash algorithm name via `digest_algo` (PHP 8.5+).
 - `isHealthy()` returns `true` if the key loaded successfully at boot.
 
 ### `ValidateConfigCommand`

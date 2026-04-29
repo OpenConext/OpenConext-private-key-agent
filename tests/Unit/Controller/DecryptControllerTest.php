@@ -11,7 +11,8 @@ use App\Controller\DecryptController;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlService;
 use App\Security\TokenAuthenticator;
-use App\Service\KeyRegistry;
+use App\Service\KeyRegistryInterface;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,20 +26,21 @@ use function random_bytes;
 class DecryptControllerTest extends TestCase
 {
     private DecryptController $controller;
-    private KeyRegistry $registry;
+
+    /** @var MockObject&KeyRegistryInterface */
+    private KeyRegistryInterface $registry;
 
     protected function setUp(): void
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'test-client', token: 'test-token', allowedKeys: ['my-key']),
             ],
         );
 
-        $this->registry = new KeyRegistry(new NullLogger());
+        $this->registry = $this->createMock(KeyRegistryInterface::class);
 
         $this->controller = new DecryptController(
             authenticator: new TokenAuthenticator($config),
@@ -54,8 +56,8 @@ class DecryptControllerTest extends TestCase
         $plaintext = 'decrypted data';
         $backend   = $this->createMock(DecryptionBackendInterface::class);
         $backend->method('decrypt')->willReturn($plaintext);
-        $backend->method('getName')->willReturn('test-backend');
-        $this->registry->registerDecryptionBackend('my-key', $backend);
+        $backend->method('getName')->willReturn('my-key');
+        $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([
@@ -84,8 +86,8 @@ class DecryptControllerTest extends TestCase
                 'my-label',
             )
             ->willReturn('data');
-        $backend->method('getName')->willReturn('test-backend');
-        $this->registry->registerDecryptionBackend('my-key', $backend);
+        $backend->method('getName')->willReturn('my-key');
+        $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([
@@ -104,7 +106,7 @@ class DecryptControllerTest extends TestCase
     public function testDecryptReturns400OnInvalidBody(): void
     {
         $backend = $this->createMock(DecryptionBackendInterface::class);
-        $this->registry->registerDecryptionBackend('my-key', $backend);
+        $this->registry->method('getDecryptionBackend')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([

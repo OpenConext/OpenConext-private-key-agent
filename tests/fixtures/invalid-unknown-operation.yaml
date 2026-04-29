@@ -5,7 +5,7 @@ keys:
     key_path: /tmp/test-key.pem
     operations:
       - sign
-      - decrypt
+      - verify
 
 clients:
   - name: test-client

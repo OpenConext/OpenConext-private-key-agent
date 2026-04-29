@@ -2,8 +2,8 @@
 # tools/comprehensive-perf-test.sh
 #
 # Comprehensive stability and performance test for the private-key-agent.
-# Combines session-reuse monitoring, memory tracking, ZTS thread-safety stress,
-# and segfault detection across four distinct load phases.
+# Combines memory tracking, concurrency stress testing, and segfault detection
+# across four distinct load phases.
 #
 # Phases:
 #   1. Baseline        6c  ×  30s per endpoint   (~120s)
@@ -281,26 +281,13 @@ info "OOMKilled: $OOM_KILLED"
 LOG_FILE="$RESULTS_DIR/container-logs.txt"
 docker compose -f "$COMPOSE_FILE" logs app 2>/dev/null > "$LOG_FILE" || true
 
-# Count session events
-SESSION_NEW=$(grep -c '"Opened new PKCS#11 session"' "$LOG_FILE" 2>/dev/null || echo 0)
-SESSION_REUSED=$(grep -c '"Reusing existing PKCS#11 session"' "$LOG_FILE" 2>/dev/null || echo 0)
-WORKER_STARTS=$(grep -c '"Worker started"' "$LOG_FILE" 2>/dev/null || echo 0)
-WORKER_RECYCLES=$(grep -c '"Worker recycling"' "$LOG_FILE" 2>/dev/null || echo 0)
-
-# Count sign operations
+# Count sign/decrypt operations
 SIGN_OPS=$(grep -c '"sign completed"' "$LOG_FILE" 2>/dev/null || echo 0)
+DECRYPT_OPS=$(grep -c '"decrypt completed"' "$LOG_FILE" 2>/dev/null || echo 0)
 
 # Segfault / fatal error detection
 SEGFAULTS=$(grep -ciE 'segfault|sigsegv|signal 11|fatal error' "$LOG_FILE" 2>/dev/null || echo 0)
-SESSION_ERRORS=$(grep -c '"session error' "$LOG_FILE" 2>/dev/null || echo 0)
-
-# Compute session reuse rate
-TOTAL_SESSION_OPS=$((SESSION_NEW + SESSION_REUSED))
-if [[ $TOTAL_SESSION_OPS -gt 0 ]]; then
-    REUSE_RATE=$(awk "BEGIN{printf \"%.3f%%\", ($SESSION_REUSED / $TOTAL_SESSION_OPS) * 100}")
-else
-    REUSE_RATE="N/A"
-fi
+BACKEND_ERRORS=$(grep -c '"BackendException"' "$LOG_FILE" 2>/dev/null || echo 0)
 
 # Sign operation timing (from debug logs) — extract durationMs values
 SIGN_TIMING_FILE="$RESULTS_DIR/sign-timing.txt"
@@ -387,15 +374,9 @@ log "  Container restarts    : $((RESTART_COUNT_AFTER - RESTART_COUNT_BEFORE))"
 log "  OOM killed            : $OOM_KILLED"
 log "  Last exit code        : $EXIT_CODE"
 log "  Segfaults detected    : $SEGFAULTS"
-log "  Session errors        : $SESSION_ERRORS"
-log ""
-
-log "  ${BOLD}Session Reuse${NC}"
-log "  New sessions          : $SESSION_NEW"
-log "  Sessions reused       : $SESSION_REUSED"
-log "  Session reuse rate    : $REUSE_RATE"
-log "  Worker starts         : $WORKER_STARTS"
-log "  Worker recycles       : $WORKER_RECYCLES"
+log "  Backend errors        : $BACKEND_ERRORS"
+log "  Sign ops logged       : $SIGN_OPS"
+log "  Decrypt ops logged    : $DECRYPT_OPS"
 log ""
 
 log "  ${BOLD}Operation Timing (from debug logs)${NC}"
@@ -412,16 +393,16 @@ log "  Total errors          : $TOTAL_ERRORS"
 log ""
 
 log "  ${BOLD}Per-phase breakdown${NC}"
-printf "  %-22s %-12s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
-    "Phase/Endpoint" "Backend" "Reqs/s" "Avg" "p50" "p95" "p99" "Slowest" "HTTP200"
+printf "  %-22s %-16s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
+    "Phase/Endpoint" "Key" "Reqs/s" "Avg" "p50" "p95" "p99" "Slowest" "HTTP200"
 printf "  %s\n" "$(printf '─%.0s' {1..100})"
 
 while IFS='|' read -r line; do
     declare -A F=()
     while IFS='=' read -r k v; do F["$k"]="$v"; done < <(tr '|' '\n' <<< "$line")
-    printf "  %-22s %-12s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
+    printf "  %-22s %-16s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
         "${F[PHASE]}/${F[LABEL]#*/}" \
-        "$(echo "${F[LABEL]}" | grep -o 'dev-signing\|dev-decrypt\|openssl' || echo '-')" \
+        "$(echo "${F[LABEL]}" | grep -oE 'dev-[a-z]+-key' || echo '-')" \
         "${F[REQS_S]}" "${F[AVG]}" "${F[P50]}" "${F[P95]}" "${F[P99]}" "${F[SLOWEST]}" \
         "${F[HTTP200]}"
 done < "$BENCH_FILE" 2>/dev/null || true

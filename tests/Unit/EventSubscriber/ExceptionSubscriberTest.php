@@ -27,7 +27,6 @@ class ExceptionSubscriberTest extends TestCase
     {
         $config           = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [],
         );

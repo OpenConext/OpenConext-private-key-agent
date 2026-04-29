@@ -4,27 +4,26 @@ declare(strict_types=1);
 
 namespace App\Backend;
 
-use App\Config\BackendGroupConfig;
+use App\Crypto\DigestInfoBuilder;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
 use OpenSSLAsymmetricKey;
 
 use function file_get_contents;
-use function hash;
 use function openssl_error_string;
 use function openssl_pkey_get_details;
 use function openssl_pkey_get_private;
 use function openssl_private_decrypt;
+use function openssl_private_encrypt;
 use function sprintf;
 use function strlen;
 
 use const OPENSSL_PKCS1_OAEP_PADDING;
 use const OPENSSL_PKCS1_PADDING;
 
-final class OpenSslDecryptionBackend implements DecryptionBackendInterface
+final class OpenSslBackend implements SigningBackendInterface, DecryptionBackendInterface
 {
     private OpenSSLAsymmetricKey $privateKey;
-    private string $publicKeyFingerprint;
     private int $modulusBytes;
 
     private const array ALGORITHM_MAP = [
@@ -37,36 +36,36 @@ final class OpenSslDecryptionBackend implements DecryptionBackendInterface
     ];
 
     public function __construct(
-        private readonly BackendGroupConfig $config,
+        private readonly string $name,
+        string $keyPath,
     ) {
-        $keyContent = @file_get_contents($config->keyPath ?? '');
+        $keyContent = @file_get_contents($keyPath);
         if ($keyContent === false) {
-            throw new BackendException(sprintf('Cannot read key file: %s', $config->keyPath));
+            throw new BackendException(sprintf('Cannot read key file: %s', $keyPath));
         }
 
         $key = openssl_pkey_get_private($keyContent);
         if ($key === false) {
-            throw new BackendException(sprintf('Invalid private key in: %s', $config->keyPath));
+            throw new BackendException(sprintf('Invalid private key in: %s', $keyPath));
         }
 
         $this->privateKey = $key;
 
         $details = openssl_pkey_get_details($this->privateKey);
         if ($details === false) {
-            throw new BackendException(sprintf('Failed to read key details from: %s', $config->keyPath));
+            throw new BackendException(sprintf('Failed to read key details from: %s', $keyPath));
         }
 
         if (! isset($details['rsa']['n'])) {
-            throw new BackendException(sprintf('Non-RSA key loaded from: %s', $config->keyPath));
+            throw new BackendException(sprintf('Non-RSA key loaded from: %s', $keyPath));
         }
 
-        $this->publicKeyFingerprint = hash('sha256', $details['rsa']['n']);
-        $this->modulusBytes         = strlen($details['rsa']['n']);
+        $this->modulusBytes = strlen($details['rsa']['n']);
     }
 
     public function getName(): string
     {
-        return $this->config->name;
+        return $this->name;
     }
 
     public function isHealthy(): bool
@@ -74,9 +73,22 @@ final class OpenSslDecryptionBackend implements DecryptionBackendInterface
         return true;
     }
 
-    public function getPublicKeyFingerprint(): string
+    public function sign(string $hash, string $algorithm): string
     {
-        return $this->publicKeyFingerprint;
+        $digestInfo = DigestInfoBuilder::prepend($hash, $algorithm);
+
+        $signature = '';
+        $result    = openssl_private_encrypt($digestInfo, $signature, $this->privateKey, OPENSSL_PKCS1_PADDING);
+
+        if ($result === false) {
+            throw new BackendException(sprintf(
+                'OpenSSL signing failed for key "%s": %s',
+                $this->name,
+                openssl_error_string() ?: 'unknown error',
+            ));
+        }
+
+        return $signature;
     }
 
     public function decrypt(string $ciphertext, string $algorithm, string|null $label = null): string
@@ -116,8 +128,8 @@ final class OpenSslDecryptionBackend implements DecryptionBackendInterface
 
         if ($result === false) {
             throw new BackendException(sprintf(
-                'OpenSSL decryption failed for backend "%s": %s',
-                $this->config->name,
+                'OpenSSL decryption failed for key "%s": %s',
+                $this->name,
                 openssl_error_string() ?: 'unknown error',
             ));
         }

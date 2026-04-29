@@ -3,9 +3,7 @@ agent_name: test-agent
 keys:
   - name: my-key
     key_path: /tmp/test-key.pem
-    operations:
-      - sign
-      - decrypt
+    operations: []
 
 clients:
   - name: test-client

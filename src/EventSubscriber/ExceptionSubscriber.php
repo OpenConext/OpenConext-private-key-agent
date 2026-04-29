@@ -9,6 +9,7 @@ use App\Exception\AccessDeniedException;
 use App\Exception\AuthenticationException;
 use App\Exception\BackendException;
 use App\Exception\InvalidRequestException;
+use App\Exception\KeyNotFoundException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
@@ -42,6 +43,7 @@ final class ExceptionSubscriber implements EventSubscriberInterface
             $exception instanceof InvalidRequestException => [400, 'invalid_request', $exception->getMessage()],
             $exception instanceof AuthenticationException => [401, 'invalid_token', $exception->getMessage()],
             $exception instanceof AccessDeniedException   => [403, 'access_denied', $exception->getMessage()],
+            $exception instanceof KeyNotFoundException    => [404, 'not_found', $exception->getMessage()],
             $exception instanceof BackendException        => [500, 'server_error', 'A backend operation failed'],
             default                                       => [500, 'server_error', 'Internal server error'],
         };

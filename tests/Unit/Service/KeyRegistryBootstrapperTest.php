@@ -4,16 +4,14 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Service;
 
-use App\Backend\BackendFactory;
-use App\Backend\OpenSslBackendTypeFactory;
 use App\Config\AgentConfig;
-use App\Config\BackendGroupConfig;
 use App\Config\ClientConfig;
 use App\Config\KeyConfig;
 use App\Service\KeyRegistryBootstrapper;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
+use function array_values;
 use function file_exists;
 use function openssl_pkey_export_to_file;
 use function openssl_pkey_new;
@@ -44,39 +42,60 @@ class KeyRegistryBootstrapperTest extends TestCase
         unlink(self::$keyPath);
     }
 
-    public function testCreateRegistryPopulatesSigningBackends(): void
+    private function makeConfig(KeyConfig ...$keyConfigs): AgentConfig
     {
-        $backendConfig = new BackendGroupConfig(name: 'soft', type: 'openssl', keyPath: self::$keyPath);
-        $keyConfig     = new KeyConfig(name: 'my-key', signingBackends: ['soft']);
-        $clientConfig  = new ClientConfig(name: 'client1', token: 'test', allowedKeys: ['my-key']);
-        $agentConfig   = new AgentConfig(
+        return new AgentConfig(
             agentName: 'test-agent',
-            backends: [$backendConfig],
-            keys: [$keyConfig],
-            clients: [$clientConfig],
+            keys: array_values($keyConfigs),
+            clients: [new ClientConfig(name: 'client1', token: 'test', allowedKeys: [])],
         );
-
-        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory()]), new NullLogger());
-        $registry     = $bootstrapper->createRegistry($agentConfig);
-
-        $this->assertContains('my-key', $registry->getSigningKeyNames());
     }
 
-    public function testCreateRegistryPopulatesDecryptionBackends(): void
+    public function testCreateRegistryRegistersSigningKey(): void
     {
-        $backendConfig = new BackendGroupConfig(name: 'soft', type: 'openssl', keyPath: self::$keyPath);
-        $keyConfig     = new KeyConfig(name: 'decrypt-key', decryptionBackends: ['soft']);
-        $clientConfig  = new ClientConfig(name: 'client1', token: 'test', allowedKeys: ['decrypt-key']);
-        $agentConfig   = new AgentConfig(
-            agentName: 'test-agent',
-            backends: [$backendConfig],
-            keys: [$keyConfig],
-            clients: [$clientConfig],
-        );
+        $keyConfig   = new KeyConfig(name: 'my-key', keyPath: self::$keyPath, operations: ['sign']);
+        $agentConfig = $this->makeConfig($keyConfig);
 
-        $bootstrapper = new KeyRegistryBootstrapper(new BackendFactory([new OpenSslBackendTypeFactory()]), new NullLogger());
+        $bootstrapper = new KeyRegistryBootstrapper(new NullLogger());
         $registry     = $bootstrapper->createRegistry($agentConfig);
 
-        $this->assertContains('decrypt-key', $registry->getDecryptionKeyNames());
+        $backend = $registry->getSigningBackend('my-key');
+        $this->assertSame('my-key', $backend->getName());
+    }
+
+    public function testCreateRegistryRegistersDecryptionKey(): void
+    {
+        $keyConfig   = new KeyConfig(name: 'decrypt-key', keyPath: self::$keyPath, operations: ['decrypt']);
+        $agentConfig = $this->makeConfig($keyConfig);
+
+        $bootstrapper = new KeyRegistryBootstrapper(new NullLogger());
+        $registry     = $bootstrapper->createRegistry($agentConfig);
+
+        $backend = $registry->getDecryptionBackend('decrypt-key');
+        $this->assertSame('decrypt-key', $backend->getName());
+    }
+
+    public function testCreateRegistryRegistersBothOperations(): void
+    {
+        $keyConfig   = new KeyConfig(name: 'dual-key', keyPath: self::$keyPath, operations: ['sign', 'decrypt']);
+        $agentConfig = $this->makeConfig($keyConfig);
+
+        $bootstrapper = new KeyRegistryBootstrapper(new NullLogger());
+        $registry     = $bootstrapper->createRegistry($agentConfig);
+
+        $this->assertSame('dual-key', $registry->getSigningBackend('dual-key')->getName());
+        $this->assertSame('dual-key', $registry->getDecryptionBackend('dual-key')->getName());
+    }
+
+    public function testCreateRegistryRegistersAllKeys(): void
+    {
+        $signingKey    = new KeyConfig(name: 'signing-key', keyPath: self::$keyPath, operations: ['sign']);
+        $decryptionKey = new KeyConfig(name: 'decryption-key', keyPath: self::$keyPath, operations: ['decrypt']);
+        $agentConfig   = $this->makeConfig($signingKey, $decryptionKey);
+
+        $bootstrapper = new KeyRegistryBootstrapper(new NullLogger());
+        $registry     = $bootstrapper->createRegistry($agentConfig);
+
+        $this->assertCount(2, $registry->getAllBackends());
     }
 }

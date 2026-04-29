@@ -39,9 +39,8 @@ class ValidateConfigCommand extends Command
         try {
             $config = ConfigLoader::load($path);
             $io->success(sprintf(
-                'Configuration is valid. Agent: "%s", %d backend(s), %d key(s), %d client(s).',
+                'Configuration is valid. Agent: "%s", %d key(s), %d client(s).',
                 $config->agentName,
-                count($config->backends),
                 count($config->keys),
                 count($config->clients),
             ));

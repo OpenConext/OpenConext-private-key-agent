@@ -109,6 +109,15 @@ group_health() {
     status=$(api GET /health)
     check "GET /health" "$status" "200"
 
+    status=$(api GET /health/key/dev-signing-key)
+    check "GET /health/key/dev-signing-key" "$status" "200"
+
+    status=$(api GET /health/key/dev-decryption-key)
+    check "GET /health/key/dev-decryption-key" "$status" "200"
+
+    status=$(api GET /health/key/no-such-key)
+    check "GET /health/key/no-such-key → 404" "$status" "404"
+
     echo ""
 }
 

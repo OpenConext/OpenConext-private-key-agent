@@ -7,15 +7,20 @@ namespace App\Config;
 use App\Exception\InvalidConfigurationException;
 use Symfony\Component\Yaml\Yaml;
 
+use function array_diff;
+use function array_unique;
 use function array_values;
 use function count;
 use function file_exists;
+use function implode;
 use function is_array;
 use function is_string;
 use function sprintf;
 
 final class ConfigLoader
 {
+    private const array VALID_OPERATIONS = ['sign', 'decrypt'];
+
     public static function load(string $path): AgentConfig
     {
         if (! file_exists($path)) {
@@ -26,15 +31,11 @@ final class ConfigLoader
 
         self::validateStructure($data);
 
-        $backends = self::parseBackends($data['backend_groups'] ?? []);
-        $keys     = self::parseKeys($data['keys'] ?? [], $backends);
-        $clients  = self::parseClients($data['clients'] ?? []);
-
-        self::validateNoOrphanBackends($backends, $keys);
+        $keys    = self::parseKeys($data['keys'] ?? []);
+        $clients = self::parseClients($data['clients'] ?? []);
 
         return new AgentConfig(
             agentName: $data['agent_name'],
-            backends: array_values($backends),
             keys: $keys,
             clients: $clients,
         );
@@ -56,42 +57,11 @@ final class ConfigLoader
     }
 
     /**
-     * @param array<mixed> $groups
-     *
-     * @return array<string, BackendGroupConfig> Indexed by name
-     */
-    private static function parseBackends(array $groups): array
-    {
-        $backends = [];
-        foreach ($groups as $group) {
-            $name = $group['name'] ?? throw new InvalidConfigurationException('Backend group must have a name');
-            $type = $group['type'] ?? throw new InvalidConfigurationException(sprintf('Backend group "%s" must have a type', $name));
-
-            if ($type !== 'openssl') {
-                throw new InvalidConfigurationException(sprintf('Backend group "%s" has invalid type "%s"', $name, $type));
-            }
-
-            if (empty($group['key_path'])) {
-                throw new InvalidConfigurationException(sprintf('OpenSSL backend group "%s" must have key_path', $name));
-            }
-
-            $backends[$name] = new BackendGroupConfig(
-                name: $name,
-                type: $type,
-                keyPath: $group['key_path'],
-            );
-        }
-
-        return $backends;
-    }
-
-    /**
-     * @param array<mixed>                      $keysData
-     * @param array<string, BackendGroupConfig> $backends
+     * @param array<mixed> $keysData
      *
      * @return list<KeyConfig>
      */
-    private static function parseKeys(array $keysData, array $backends): array
+    private static function parseKeys(array $keysData): array
     {
         $keys      = [];
         $seenNames = [];
@@ -105,25 +75,28 @@ final class ConfigLoader
 
             $seenNames[$name] = true;
 
-            $signingBackends    = $keyData['signing_backends'] ?? [];
-            $decryptionBackends = $keyData['decryption_backends'] ?? [];
-
-            foreach ($signingBackends as $ref) {
-                if (! isset($backends[$ref])) {
-                    throw new InvalidConfigurationException(sprintf('Key "%s" references unknown signing backend: %s', $name, $ref));
-                }
+            if (empty($keyData['key_path']) || ! is_string($keyData['key_path'])) {
+                throw new InvalidConfigurationException(sprintf('Key "%s" must have a key_path', $name));
             }
 
-            foreach ($decryptionBackends as $ref) {
-                if (! isset($backends[$ref])) {
-                    throw new InvalidConfigurationException(sprintf('Key "%s" references unknown decryption backend: %s', $name, $ref));
-                }
+            $operations = $keyData['operations'] ?? [];
+            if (! is_array($operations) || count($operations) === 0) {
+                throw new InvalidConfigurationException(sprintf('Key "%s" must have at least one operation', $name));
+            }
+
+            $unknown = array_diff(array_unique($operations), self::VALID_OPERATIONS);
+            if (count($unknown) > 0) {
+                throw new InvalidConfigurationException(sprintf(
+                    'Key "%s" has unknown operation(s): %s. Valid: sign, decrypt',
+                    $name,
+                    implode(', ', $unknown),
+                ));
             }
 
             $keys[] = new KeyConfig(
                 name: $name,
-                signingBackends: $signingBackends,
-                decryptionBackends: $decryptionBackends,
+                keyPath: $keyData['key_path'],
+                operations: array_values($operations),
             );
         }
 
@@ -154,29 +127,5 @@ final class ConfigLoader
         }
 
         return $clients;
-    }
-
-    /**
-     * @param array<string, BackendGroupConfig> $backends
-     * @param list<KeyConfig>                   $keys
-     */
-    private static function validateNoOrphanBackends(array $backends, array $keys): void
-    {
-        $referenced = [];
-        foreach ($keys as $key) {
-            foreach ($key->signingBackends as $ref) {
-                $referenced[$ref] = true;
-            }
-
-            foreach ($key->decryptionBackends as $ref) {
-                $referenced[$ref] = true;
-            }
-        }
-
-        foreach ($backends as $name => $backend) {
-            if (! isset($referenced[$name])) {
-                throw new InvalidConfigurationException(sprintf('Backend group "%s" is not referenced by any key (orphan)', $name));
-            }
-        }
     }
 }

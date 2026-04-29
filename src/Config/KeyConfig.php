@@ -7,14 +7,14 @@ namespace App\Config;
 final readonly class KeyConfig
 {
     /**
-     * @param string       $name               Key name used in URL path (e.g. "my-signing-key")
-     * @param list<string> $signingBackends    Backend group names for signing
-     * @param list<string> $decryptionBackends Backend group names for decryption
+     * @param string                 $name       Key name used in URL path (e.g. "my-signing-key")
+     * @param string                 $keyPath    Path to the PEM private key file
+     * @param list<'sign'|'decrypt'> $operations Permitted operations for this key
      */
     public function __construct(
         public string $name,
-        public array $signingBackends = [],
-        public array $decryptionBackends = [],
+        public string $keyPath,
+        public array $operations,
     ) {
     }
 }

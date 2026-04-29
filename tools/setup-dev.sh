@@ -78,25 +78,16 @@ info "Writing config/private-key-agent.yaml..."
 cat > "$CONFIG_FILE" <<YAML
 agent_name: private-key-agent-dev
 
-backend_groups:
-  # OpenSSL backend — signing key (unencrypted PEM, dev only)
-  - name: openssl-signing
-    type: openssl
-    key_path: /var/www/html/config/keys/dev-signing.pem
-
-  # OpenSSL backend — decryption key (unencrypted PEM, dev only)
-  - name: openssl-decryption
-    type: openssl
-    key_path: /var/www/html/config/keys/dev-decryption.pem
-
 keys:
+  # Signing key — unencrypted PEM (dev only)
   - name: dev-signing-key
-    signing_backends:
-      - openssl-signing
+    key_path: /var/www/html/config/keys/dev-signing.pem
+    operations: [sign]
 
+  # Decryption key — unencrypted PEM (dev only)
   - name: dev-decryption-key
-    decryption_backends:
-      - openssl-decryption
+    key_path: /var/www/html/config/keys/dev-decryption.pem
+    operations: [decrypt]
 
 clients:
   - name: dev-client

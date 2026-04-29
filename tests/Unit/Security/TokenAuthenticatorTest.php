@@ -16,7 +16,6 @@ class TokenAuthenticatorTest extends TestCase
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'my-client', token: 'valid-token-here-must-be-long', allowedKeys: ['key1']),
@@ -34,7 +33,6 @@ class TokenAuthenticatorTest extends TestCase
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
@@ -51,7 +49,6 @@ class TokenAuthenticatorTest extends TestCase
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
@@ -69,7 +66,6 @@ class TokenAuthenticatorTest extends TestCase
         // Verifies the authenticator works with multiple clients and picks the right one
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'client-a', token: 'token-aaa', allowedKeys: ['key1']),

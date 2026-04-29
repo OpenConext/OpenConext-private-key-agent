@@ -18,7 +18,8 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 |---|---|---|
 | `POST /sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
 | `POST /decrypt/{key_name}` | Base64-encoded ciphertext + algorithm (+ optional OAEP label) | Base64-encoded plaintext (symmetric key) |
-| `GET /health` | — | Backend health status |
+| `GET /health` | — | Overall health status |
+| `GET /health/key/{key_name}` | — | Per-key health status |
 
 **The private key never leaves the agent.** Only cryptographic inputs and outputs cross the network boundary.
 
@@ -41,11 +42,10 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 ### Key features
 
 - **OpenSSL backend:** software PEM keys protected by the agent process.
-- **Multiple backends per key:** configure several backend groups for the same logical key to get round-robin load distribution.
 - **Static bearer-token authentication** (RFC 6750): each client has a pre-shared token; tokens are compared with `hash_equals()` to prevent timing attacks.
 - **Per-client key authorisation:** each client declares the key names it may use.
 - **Fail-fast configuration:** invalid or missing config prevents the PHP-FPM worker from starting.
-- **Health endpoints:** `/health` and `/health/backend/{name}` for liveness probes and monitoring.
+- **Health endpoints:** `/health` and `/health/key/{key_name}` for liveness probes and monitoring.
 
 ### Technology stack
 
@@ -128,14 +128,14 @@ Run a single group:
 
 ### Development keys
 
-After running `setup-dev.sh` the project has two logical keys, each backed by an OpenSSL backend.
+After running `setup-dev.sh` the project has two logical keys.
 
 #### Key inventory
 
-| Logical key name | Backend | Type | Allowed operations |
-|---|---|---|---|
-| `dev-signing-key` | OpenSSL (`openssl-signing`) | Software PEM | signing |
-| `dev-decryption-key` | OpenSSL (`openssl-decryption`) | Software PEM | decryption |
+| Logical key name | Type | Allowed operations |
+|---|---|---|
+| `dev-signing-key` | Software PEM (OpenSSL) | signing |
+| `dev-decryption-key` | Software PEM (OpenSSL) | decryption |
 
 #### OpenSSL (software) keys
 
@@ -342,15 +342,10 @@ The agent is configured from a single YAML file. The path is set via the `PRIVAT
 ```yaml
 agent_name: my-private-key-agent
 
-backend_groups:
-  - name: software-backend
-    type: openssl
-    key_path: /etc/private-key-agent/keys/signing.pem
-
 keys:
   - name: my-signing-key
-    signing_backends:
-      - software-backend
+    key_path: /etc/private-key-agent/keys/signing.pem
+    operations: [sign]
 
 clients:
   - name: simplesamlphp
@@ -435,7 +430,7 @@ For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.m
 | `POST` | `/sign/{key_name}` | Bearer token | Sign a hash |
 | `POST` | `/decrypt/{key_name}` | Bearer token | Decrypt ciphertext |
 | `GET` | `/health` | None | Overall health |
-| `GET` | `/health/backend/{name}` | None | Per-backend health |
+| `GET` | `/health/key/{key_name}` | None | Per-key health |
 
 Error responses follow RFC 6750 and always include `status`, `error`, and an optional `message` field. On `401` a `WWW-Authenticate` header is also returned.
 

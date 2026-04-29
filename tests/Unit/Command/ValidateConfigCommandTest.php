@@ -21,13 +21,10 @@ class ValidateConfigCommandTest extends TestCase
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
 keys:
   - name: k1
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
