@@ -41,6 +41,7 @@ COPY docker/apache-app.conf /etc/apache2/sites-enabled/000-default.conf
 COPY docker/entrypoint-app.sh /entrypoint-app.sh
 RUN chmod +x /entrypoint-app.sh
 ENTRYPOINT ["/entrypoint-app.sh"]
+CMD ["/entrypoint.sh", "sh", "-c", "php bin/console cache:warmup --no-interaction && chown -R www-data:www-data /var/www/html/var && exec apache2-foreground"]
 
 # ---- Development stage (extends prod with all dev tooling) ----
 FROM prod AS dev
