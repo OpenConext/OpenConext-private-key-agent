@@ -1,24 +1,24 @@
 {
     "name": "openconext/private-key-agent",
-    "description": "REST API service for RSA signing and decryption using OpenSSL or PKCS#11 backends",
+    "description": "REST API service for RSA signing and decryption using OpenSSL backends",
     "type": "project",
     "license": "Apache-2.0",
     "require": {
         "php": "^8.5",
-        "nelmio/api-doc-bundle": "^4.0",
-        "runtime/frankenphp-symfony": "^1.0",
         "symfony/console": "^7.4",
+        "symfony/flex": "^2.0",
         "symfony/framework-bundle": "^7.4",
         "symfony/monolog-bundle": "^3.10",
         "symfony/property-access": "^7.4",
+        "symfony/rate-limiter": "^7.4",
         "symfony/runtime": "^7.4",
-        "symfony/security-bundle": "^7.4",
         "symfony/serializer": "^7.4",
         "symfony/validator": "^7.4",
         "symfony/yaml": "^7.4"
     },
     "require-dev": {
         "doctrine/coding-standard": "^14.0",
+        "nelmio/api-doc-bundle": "^5.10",
         "overtrue/phplint": "^9.7",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan": "^2.1",
@@ -26,8 +26,9 @@
         "phpstan/phpstan-symfony": "^2.0",
         "phpunit/phpunit": "^11.0",
         "squizlabs/php_codesniffer": "^4.0",
-        "symfony/dotenv": "^8.0",
-        "symfony/test-pack": "^1.0"
+        "symfony/asset": "^7.4",
+        "symfony/dotenv": "^7.4",
+        "symfony/twig-bundle": "^7.4"
     },
     "autoload": {
         "psr-4": {
@@ -62,9 +63,13 @@
         "check": [
             "@phplint",
             "@phpstan",
+            "@phpcs",
             "@composer audit",
             "@test"
-        ]
+        ],
+        "auto-scripts": {
+            "cache:clear": "symfony-cmd"
+        }
     },
     "extra": {
         "symfony": {

@@ -20,14 +20,10 @@ class ConfigLoaderTest extends TestCase
         $config = ConfigLoader::load(__DIR__ . '/../../fixtures/valid-config.yaml');
 
         $this->assertSame('test-agent', $config->agentName);
-        $this->assertCount(1, $config->backends);
-        $this->assertSame('soft-key-1', $config->backends[0]->name);
-        $this->assertSame('openssl', $config->backends[0]->type);
-        $this->assertSame('/tmp/test-key.pem', $config->backends[0]->keyPath);
         $this->assertCount(1, $config->keys);
         $this->assertSame('my-key', $config->keys[0]->name);
-        $this->assertSame(['soft-key-1'], $config->keys[0]->signingBackends);
-        $this->assertSame(['soft-key-1'], $config->keys[0]->decryptionBackends);
+        $this->assertSame('/tmp/test-key.pem', $config->keys[0]->keyPath);
+        $this->assertSame(['sign', 'decrypt'], $config->keys[0]->operations);
         $this->assertCount(1, $config->clients);
         $this->assertSame('test-client', $config->clients[0]->name);
         $this->assertSame(['my-key'], $config->clients[0]->allowedKeys);
@@ -47,26 +43,31 @@ class ConfigLoaderTest extends TestCase
         ConfigLoader::load(__DIR__ . '/../../fixtures/invalid-missing-agent-name.yaml');
     }
 
-    public function testLoadThrowsOnOrphanBackend(): void
+    public function testLoadThrowsOnEmptyOperations(): void
     {
         $this->expectException(InvalidConfigurationException::class);
-        $this->expectExceptionMessage('orphan-backend');
-        ConfigLoader::load(__DIR__ . '/../../fixtures/invalid-orphan-backend.yaml');
+        $this->expectExceptionMessage('at least one operation');
+        ConfigLoader::load(__DIR__ . '/../../fixtures/invalid-empty-operations.yaml');
+    }
+
+    public function testLoadThrowsOnUnknownOperation(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('unknown operation');
+        ConfigLoader::load(__DIR__ . '/../../fixtures/invalid-unknown-operation.yaml');
     }
 
     public function testLoadThrowsOnDuplicateKeyNames(): void
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
 keys:
   - name: dupe
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [sign]
   - name: dupe
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [decrypt]
 clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
@@ -84,17 +85,13 @@ YAML;
         }
     }
 
-    public function testLoadThrowsOnUnknownBackendReference(): void
+    public function testLoadThrowsOnMissingKeyPath(): void
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
 keys:
   - name: k1
-    signing_backends: [nonexistent]
+    operations: [sign]
 clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
@@ -105,7 +102,7 @@ YAML;
 
         try {
             $this->expectException(InvalidConfigurationException::class);
-            $this->expectExceptionMessage('nonexistent');
+            $this->expectExceptionMessage('key_path');
             ConfigLoader::load($tmpFile);
         } finally {
             unlink($tmpFile);
@@ -116,13 +113,10 @@ YAML;
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
 keys:
   - name: k1
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients: []
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
@@ -141,13 +135,10 @@ YAML;
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
 keys:
   - name: k1
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - name: c1
     token: ""
@@ -158,153 +149,175 @@ YAML;
 
         try {
             $this->expectException(InvalidConfigurationException::class);
-            $this->expectExceptionMessage('non-empty');
+            $this->expectExceptionMessage('at least 32 characters');
             ConfigLoader::load($tmpFile);
         } finally {
             unlink($tmpFile);
         }
     }
 
-    public function testLoadPkcs11Backend(): void
+    public function testLoadThrowsOnShortClientToken(): void
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
 keys:
   - name: k1
-    signing_backends: [hsm1]
+    key_path: /tmp/key.pem
+    operations: [sign]
 clients:
   - name: c1
-    token: test-token-value-at-least-32-chars-long
+    token: short-token
     allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertSame('pkcs11', $config->backends[0]->type);
-            $this->assertSame('/usr/lib/softhsm/libsofthsm2.so', $config->backends[0]->pkcs11Lib);
-            $this->assertSame(0, $config->backends[0]->pkcs11Slot);
-            $this->assertSame('1234', $config->backends[0]->pkcs11Pin);
-            $this->assertSame('my-key', $config->backends[0]->pkcs11KeyLabel);
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadPkcs11BackendWithoutPin(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_key_label: my-key
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [k1]
-YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
-
-        try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertNull($config->backends[0]->pkcs11Pin);
-        } finally {
-            unlink($tmpFile);
-        }
-    }
-
-    public function testLoadThrowsOnPkcs11MissingLib(): void
-    {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [c1]
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
-            $this->expectExceptionMessage('pkcs11_lib');
+            $this->expectExceptionMessage('at least 32 characters');
             ConfigLoader::load($tmpFile);
         } finally {
             unlink($tmpFile);
         }
     }
 
-    public function testLoadBackendWithEnvironment(): void
+    public function testLoadThrowsOnNonArrayKeys(): void
     {
-        $yaml    = <<<'YAML'
-agent_name: test-agent
-backend_groups:
-  - name: hsm1
-    type: pkcs11
-    pkcs11_lib: /usr/lib/softhsm/libsofthsm2.so
-    pkcs11_slot: 0
-    pkcs11_pin: "1234"
-    pkcs11_key_label: my-key
-    environment:
-      SOFTHSM2_CONF: /etc/softhsm2.conf
-      ANOTHER_VAR: "some value"
-keys:
-  - name: k1
-    signing_backends: [hsm1]
-clients:
-  - name: c1
-    token: test-token-value-at-least-32-chars-long
-    allowed_keys: [k1]
-YAML;
+        $yaml    = "agent_name: test-agent\nkeys: bad-string\nclients:\n  - name: c1\n    token: test-token-value-at-least-32-chars-long\n    allowed_keys: []\n";
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
 
         try {
-            $config = ConfigLoader::load($tmpFile);
-            $this->assertSame(
-                ['SOFTHSM2_CONF' => '/etc/softhsm2.conf', 'ANOTHER_VAR' => 'some value'],
-                $config->backends[0]->environment,
-            );
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"keys"');
+            ConfigLoader::load($tmpFile);
         } finally {
             unlink($tmpFile);
         }
     }
 
-    public function testLoadBackendWithoutEnvironmentDefaultsToEmptyArray(): void
+    public function testLoadThrowsOnScalarKeyEntry(): void
     {
         $yaml    = <<<'YAML'
 agent_name: test-agent
-backend_groups:
-  - name: b1
-    type: openssl
-    key_path: /tmp/key.pem
+keys:
+  - bad-scalar-entry
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"keys"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnScalarClientEntry(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
 keys:
   - name: k1
-    signing_backends: [b1]
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - bad-scalar-entry
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('"clients"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingKeyName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Key must have a name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingClientName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Client must have a name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingClientToken(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('token');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
 clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
@@ -314,8 +327,182 @@ YAML;
         file_put_contents($tmpFile, $yaml);
 
         try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('At least one key must be configured');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnEmptyKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys: []
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('At least one key must be configured');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnInvalidKeyName(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: "invalid key!"
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('[a-zA-Z0-9_-]{1,64}');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnDuplicateClientNames(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: sp
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+  - name: sp
+    token: another-token-value-at-least-32-chars-long
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('Duplicate client name');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnEmptyAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: []
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys must be a non-empty list');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnMissingAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys must be a non-empty list');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnNonStringAllowedKeyEntry(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [123]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('allowed_keys entries must be non-empty strings');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadValidConfigWithWildcardAllowedKeys(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: ["*"]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
             $config = ConfigLoader::load($tmpFile);
-            $this->assertSame([], $config->backends[0]->environment);
+            $this->assertSame(['*'], $config->clients[0]->allowedKeys);
         } finally {
             unlink($tmpFile);
         }

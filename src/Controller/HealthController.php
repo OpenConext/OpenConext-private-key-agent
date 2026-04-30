@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\KeyName;
 use App\Service\KeyRegistryInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -11,6 +12,7 @@ use Symfony\Component\Routing\Attribute\Route;
 use function array_unique;
 use function array_values;
 use function count;
+use function sprintf;
 
 final class HealthController
 {
@@ -33,42 +35,41 @@ final class HealthController
 
         if (count($unhealthyNames) > 0) {
             return new JsonResponse([
-                'status'             => 503,
-                'error'              => 'server_error',
-                'message'            => 'One or more backends are unhealthy',
-                'unhealthy_backends' => array_values(array_unique($unhealthyNames)),
+                'status'          => 503,
+                'error'           => 'server_error',
+                'message'         => 'One or more keys are unhealthy',
+                'unhealthy_keys'  => array_values(array_unique($unhealthyNames)),
             ], 503);
         }
 
         return new JsonResponse(['status' => 'OK']);
     }
 
-    #[Route('/health/backend/{backendName}', name: 'health_backend', methods: ['GET'])]
-    public function backendHealth(string $backendName): JsonResponse
+    #[Route('/health/key/{keyName}', name: 'health_key', methods: ['GET'], requirements: ['keyName' => KeyName::PATTERN])]
+    public function keyHealth(string $keyName): JsonResponse
     {
-        $backends = $this->keyRegistry->getBackendsByName($backendName);
+        $backend = $this->keyRegistry->findBackend($keyName);
 
-        if (count($backends) === 0) {
+        if ($backend === null) {
             return new JsonResponse([
-                'status'       => 'not_found',
-                'backend_name' => $backendName,
+                'status'  => 404,
+                'error'   => 'not_found',
+                'message' => sprintf('Key "%s" not found', $keyName),
             ], 404);
         }
 
-        foreach ($backends as $backend) {
-            if (! $backend->isHealthy()) {
-                return new JsonResponse([
-                    'status'       => 503,
-                    'error'        => 'server_error',
-                    'message'      => 'Backend is unhealthy',
-                    'backend_name' => $backendName,
-                ], 503);
-            }
+        if (! $backend->isHealthy()) {
+            return new JsonResponse([
+                'status'   => 503,
+                'error'    => 'server_error',
+                'message'  => 'Key is unhealthy',
+                'key_name' => $keyName,
+            ], 503);
         }
 
         return new JsonResponse([
-            'status'       => 'OK',
-            'backend_name' => $backendName,
+            'status'   => 'OK',
+            'key_name' => $keyName,
         ]);
     }
 }

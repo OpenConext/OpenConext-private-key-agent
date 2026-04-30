@@ -6,13 +6,14 @@ namespace App\Security;
 
 use App\Config\ClientConfig;
 use App\Exception\AuthenticationException;
+use Symfony\Component\HttpFoundation\Request;
 
 interface AuthenticatorInterface
 {
     /**
-     * Authenticates a bearer token and returns the matching client config.
+     * Extracts and authenticates the bearer token from an HTTP request.
      *
-     * @throws AuthenticationException If no client matches the token.
+     * @throws AuthenticationException If the Authorization header is missing or the token is invalid.
      */
-    public function authenticate(string $token): ClientConfig;
+    public function authenticate(Request $request): ClientConfig;
 }

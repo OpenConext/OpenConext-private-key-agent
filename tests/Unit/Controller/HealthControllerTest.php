@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Controller;
 
-use App\Backend\DecryptionBackendInterface;
-use App\Backend\SigningBackendInterface;
+use App\Backend\BackendInterface;
 use App\Controller\HealthController;
-use App\Service\KeyRegistry;
+use App\Service\KeyRegistryInterface;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 
 use function json_decode;
 
@@ -17,10 +15,11 @@ class HealthControllerTest extends TestCase
 {
     public function testHealthReturns200WhenNoBackendsRegistered(): void
     {
-        $registry   = new KeyRegistry(new NullLogger());
-        $controller = new HealthController($registry);
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('getAllBackends')->willReturn([]);
 
-        $response = $controller->health();
+        $controller = new HealthController($registry);
+        $response   = $controller->health();
 
         $this->assertSame(200, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
@@ -29,15 +28,15 @@ class HealthControllerTest extends TestCase
 
     public function testHealthReturns200WhenAllBackendsHealthy(): void
     {
-        $backend = $this->createMock(SigningBackendInterface::class);
+        $backend = $this->createMock(BackendInterface::class);
         $backend->method('isHealthy')->willReturn(true);
-        $backend->method('getName')->willReturn('openssl-signing');
+        $backend->method('getName')->willReturn('my-key');
 
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('my-key', $backend);
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('getAllBackends')->willReturn([$backend]);
+
         $controller = new HealthController($registry);
-
-        $response = $controller->health();
+        $response   = $controller->health();
 
         $this->assertSame(200, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
@@ -46,125 +45,75 @@ class HealthControllerTest extends TestCase
 
     public function testHealthReturns503WhenAnyBackendUnhealthy(): void
     {
-        $healthy = $this->createMock(SigningBackendInterface::class);
+        $healthy = $this->createMock(BackendInterface::class);
         $healthy->method('isHealthy')->willReturn(true);
-        $healthy->method('getName')->willReturn('openssl-signing');
+        $healthy->method('getName')->willReturn('healthy-key');
 
-        $unhealthy = $this->createMock(DecryptionBackendInterface::class);
+        $unhealthy = $this->createMock(BackendInterface::class);
         $unhealthy->method('isHealthy')->willReturn(false);
-        $unhealthy->method('getName')->willReturn('softhsm');
+        $unhealthy->method('getName')->willReturn('bad-key');
 
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('key-a', $healthy);
-        $registry->registerDecryptionBackend('key-b', $unhealthy);
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('getAllBackends')->willReturn([$healthy, $unhealthy]);
+
         $controller = new HealthController($registry);
-
-        $response = $controller->health();
+        $response   = $controller->health();
 
         $this->assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
         $this->assertSame(503, $body['status']);
         $this->assertSame('server_error', $body['error']);
-        $this->assertContains('softhsm', $body['unhealthy_backends']);
-        $this->assertNotContains('openssl-signing', $body['unhealthy_backends']);
+        $this->assertContains('bad-key', $body['unhealthy_keys']);
+        $this->assertNotContains('healthy-key', $body['unhealthy_keys']);
     }
 
-    public function testHealthUnhealthyBackendNamesAreDeduplicated(): void
+    public function testKeyHealthReturns200ForHealthyKey(): void
     {
-        // Same named backend registered under two keys, both unhealthy
-        $backend1 = $this->createMock(SigningBackendInterface::class);
-        $backend1->method('isHealthy')->willReturn(false);
-        $backend1->method('getName')->willReturn('softhsm');
-
-        $backend2 = $this->createMock(SigningBackendInterface::class);
-        $backend2->method('isHealthy')->willReturn(false);
-        $backend2->method('getName')->willReturn('softhsm');
-
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('key-a', $backend1);
-        $registry->registerSigningBackend('key-b', $backend2);
-        $controller = new HealthController($registry);
-
-        $response = $controller->health();
-
-        $this->assertSame(503, $response->getStatusCode());
-        $body = json_decode((string) $response->getContent(), true);
-        $this->assertSame(['softhsm'], $body['unhealthy_backends']);
-    }
-
-    public function testBackendHealthReturns200ForHealthyBackend(): void
-    {
-        $backend = $this->createMock(SigningBackendInterface::class);
+        $backend = $this->createMock(BackendInterface::class);
         $backend->method('isHealthy')->willReturn(true);
-        $backend->method('getName')->willReturn('openssl-signing');
 
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('my-key', $backend);
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('findBackend')->with('my-key')->willReturn($backend);
+
         $controller = new HealthController($registry);
-
-        $response = $controller->backendHealth('openssl-signing');
+        $response   = $controller->keyHealth('my-key');
 
         $this->assertSame(200, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
         $this->assertSame('OK', $body['status']);
-        $this->assertSame('openssl-signing', $body['backend_name']);
+        $this->assertSame('my-key', $body['key_name']);
     }
 
-    public function testBackendHealthReturns503WhenAnyInstanceUnhealthy(): void
+    public function testKeyHealthReturns404ForUnknownKey(): void
     {
-        // Same backend name used for signing + decryption; decryption instance is unhealthy
-        $signingInstance = $this->createMock(SigningBackendInterface::class);
-        $signingInstance->method('isHealthy')->willReturn(true);
-        $signingInstance->method('getName')->willReturn('softhsm');
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('findBackend')->with('no-such-key')->willReturn(null);
 
-        $decryptionInstance = $this->createMock(DecryptionBackendInterface::class);
-        $decryptionInstance->method('isHealthy')->willReturn(false);
-        $decryptionInstance->method('getName')->willReturn('softhsm');
-
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('hsm-key', $signingInstance);
-        $registry->registerDecryptionBackend('hsm-key', $decryptionInstance);
         $controller = new HealthController($registry);
+        $response   = $controller->keyHealth('no-such-key');
 
-        $response = $controller->backendHealth('softhsm');
+        $this->assertSame(404, $response->getStatusCode());
+        $body = json_decode((string) $response->getContent(), true);
+        $this->assertSame(404, $body['status']);
+        $this->assertSame('not_found', $body['error']);
+        $this->assertStringContainsString('no-such-key', $body['message']);
+    }
+
+    public function testKeyHealthReturns503WhenKeyIsUnhealthy(): void
+    {
+        $backend = $this->createMock(BackendInterface::class);
+        $backend->method('isHealthy')->willReturn(false);
+
+        $registry = $this->createMock(KeyRegistryInterface::class);
+        $registry->method('findBackend')->with('bad-key')->willReturn($backend);
+
+        $controller = new HealthController($registry);
+        $response   = $controller->keyHealth('bad-key');
 
         $this->assertSame(503, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
         $this->assertSame(503, $body['status']);
         $this->assertSame('server_error', $body['error']);
-        $this->assertSame('softhsm', $body['backend_name']);
-    }
-
-    public function testBackendHealthReturns503WhenSameNameAcrossMultipleKeysUnhealthy(): void
-    {
-        $backend1 = $this->createMock(SigningBackendInterface::class);
-        $backend1->method('isHealthy')->willReturn(true);
-        $backend1->method('getName')->willReturn('openssl-signing');
-
-        $backend2 = $this->createMock(SigningBackendInterface::class);
-        $backend2->method('isHealthy')->willReturn(false);
-        $backend2->method('getName')->willReturn('openssl-signing');
-
-        $registry = new KeyRegistry(new NullLogger());
-        $registry->registerSigningBackend('key-a', $backend1);
-        $registry->registerSigningBackend('key-b', $backend2);
-        $controller = new HealthController($registry);
-
-        $response = $controller->backendHealth('openssl-signing');
-
-        $this->assertSame(503, $response->getStatusCode());
-    }
-
-    public function testBackendHealthReturns404ForUnknownBackend(): void
-    {
-        $registry   = new KeyRegistry(new NullLogger());
-        $controller = new HealthController($registry);
-
-        $response = $controller->backendHealth('no-such-backend');
-
-        $this->assertSame(404, $response->getStatusCode());
-        $body = json_decode((string) $response->getContent(), true);
-        $this->assertSame('not_found', $body['status']);
-        $this->assertSame('no-such-backend', $body['backend_name']);
+        $this->assertSame('bad-key', $body['key_name']);
     }
 }

@@ -1,16 +1,11 @@
 agent_name: test-agent
 
-backend_groups:
-  - name: soft-key-1
-    type: openssl
-    key_path: /tmp/test-key.pem
-
 keys:
   - name: my-key
-    signing_backends:
-      - soft-key-1
-    decryption_backends:
-      - soft-key-1
+    key_path: /tmp/test-key.pem
+    operations:
+      - sign
+      - decrypt
 
 clients:
   - name: test-client

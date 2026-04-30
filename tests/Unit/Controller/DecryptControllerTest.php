@@ -8,13 +8,18 @@ use App\Backend\DecryptionBackendInterface;
 use App\Config\AgentConfig;
 use App\Config\ClientConfig;
 use App\Controller\DecryptController;
+use App\Exception\AuthenticationException;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlService;
 use App\Security\TokenAuthenticator;
-use App\Service\KeyRegistry;
+use App\Service\KeyRegistryInterface;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\RateLimiter\LimiterInterface;
+use Symfony\Component\RateLimiter\RateLimit;
+use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 use Symfony\Component\Validator\Validation;
 
 use function base64_encode;
@@ -25,23 +30,24 @@ use function random_bytes;
 class DecryptControllerTest extends TestCase
 {
     private DecryptController $controller;
-    private KeyRegistry $registry;
+
+    /** @var MockObject&KeyRegistryInterface */
+    private KeyRegistryInterface $registry;
 
     protected function setUp(): void
     {
         $config = new AgentConfig(
             agentName: 'test-agent',
-            backends: [],
             keys: [],
             clients: [
                 new ClientConfig(name: 'test-client', token: 'test-token', allowedKeys: ['my-key']),
             ],
         );
 
-        $this->registry = new KeyRegistry(new NullLogger());
+        $this->registry = $this->createMock(KeyRegistryInterface::class);
 
         $this->controller = new DecryptController(
-            authenticator: new TokenAuthenticator($config),
+            authenticator: new TokenAuthenticator($config, $this->makeAcceptingLimiter()),
             accessControl: new AccessControlService(),
             keyRegistry: $this->registry,
             validator: Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator(),
@@ -49,13 +55,27 @@ class DecryptControllerTest extends TestCase
         );
     }
 
+    private function makeAcceptingLimiter(): RateLimiterFactoryInterface
+    {
+        $rateLimit = $this->createMock(RateLimit::class);
+        $rateLimit->method('isAccepted')->willReturn(true);
+
+        $limiter = $this->createMock(LimiterInterface::class);
+        $limiter->method('consume')->willReturn($rateLimit);
+
+        $factory = $this->createMock(RateLimiterFactoryInterface::class);
+        $factory->method('create')->willReturn($limiter);
+
+        return $factory;
+    }
+
     public function testDecryptReturnsBase64Plaintext(): void
     {
         $plaintext = 'decrypted data';
         $backend   = $this->createMock(DecryptionBackendInterface::class);
         $backend->method('decrypt')->willReturn($plaintext);
-        $backend->method('getName')->willReturn('test-backend');
-        $this->registry->registerDecryptionBackend('my-key', $backend);
+        $backend->method('getName')->willReturn('my-key');
+        $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([
@@ -73,38 +93,35 @@ class DecryptControllerTest extends TestCase
         $this->assertSame(base64_encode($plaintext), $body['decrypted_data']);
     }
 
-    public function testDecryptPassesLabelToBackend(): void
+    public function testDecryptThrowsOnMissingAuthorizationHeader(): void
     {
-        $backend = $this->createMock(DecryptionBackendInterface::class);
-        $backend->expects($this->once())
-            ->method('decrypt')
-            ->with(
-                $this->anything(),
-                'rsa-pkcs1-oaep-mgf1-sha256',
-                'my-label',
-            )
-            ->willReturn('data');
-        $backend->method('getName')->willReturn('test-backend');
-        $this->registry->registerDecryptionBackend('my-key', $backend);
-
         $request = new Request(
             content: (string) json_encode([
-                'algorithm' => 'rsa-pkcs1-oaep-mgf1-sha256',
+                'algorithm' => 'rsa-pkcs1-v1_5',
                 'encrypted_data' => base64_encode(random_bytes(256)),
-                'label' => base64_encode('my-label'),
             ]),
         );
+        $request->headers->set('Content-Type', 'application/json');
+
+        $this->expectException(AuthenticationException::class);
+        $this->controller->decrypt($request, 'my-key');
+    }
+
+    public function testDecryptThrowsOnNonArrayJsonBody(): void
+    {
+        $request = new Request(content: '"just a string"');
         $request->headers->set('Authorization', 'Bearer test-token');
         $request->headers->set('Content-Type', 'application/json');
 
-        $response = $this->controller->decrypt($request, 'my-key');
-        $this->assertSame(200, $response->getStatusCode());
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('Invalid JSON body');
+        $this->controller->decrypt($request, 'my-key');
     }
 
     public function testDecryptReturns400OnInvalidBody(): void
     {
         $backend = $this->createMock(DecryptionBackendInterface::class);
-        $this->registry->registerDecryptionBackend('my-key', $backend);
+        $this->registry->method('getDecryptionBackend')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([

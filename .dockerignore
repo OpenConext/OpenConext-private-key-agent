@@ -1,12 +1,8 @@
 .git
 .worktrees
 .phpunit.result.cache
-.phplint.yml
 .phplint.cache
-phpcs.xml
-phpunit.xml.dist
 docs
-tests
 vendor
 var/cache
 var/log

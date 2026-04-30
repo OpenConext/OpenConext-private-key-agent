@@ -1,9 +1,19 @@
 framework:
     secret: '%env(APP_SECRET)%'
+    trusted_proxies: '%env(default::TRUSTED_PROXIES)%'
+    trusted_headers: ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-port', 'x-forwarded-proto', 'x-forwarded-prefix']
     handle_all_throwables: true
+    http_method_override: false
+    session: false
+    router:
+        utf8: true
     php_errors:
         log: true
     serializer:
         enabled: true
     validation:
         enabled: true
+
+when@dev:
+    framework:
+        assets: ~

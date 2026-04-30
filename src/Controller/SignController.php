@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\KeyName;
 use App\Dto\SignRequest;
 use App\Exception\InvalidRequestException;
 use App\Security\AccessControlInterface;
@@ -17,10 +18,10 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 use function base64_decode;
 use function base64_encode;
+use function hrtime;
 use function is_array;
 use function json_decode;
-use function str_starts_with;
-use function substr;
+use function round;
 
 final class SignController
 {
@@ -33,11 +34,10 @@ final class SignController
     ) {
     }
 
-    #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'])]
+    #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
     public function sign(Request $request, string $keyName): JsonResponse
     {
-        $token  = $this->extractBearerToken($request);
-        $client = $this->authenticator->authenticate($token);
+        $client = $this->authenticator->authenticate($request);
 
         $this->accessControl->checkAccess($client, $keyName);
 
@@ -62,7 +62,16 @@ final class SignController
             throw new InvalidRequestException('Invalid base64-encoded hash');
         }
 
+        $start          = hrtime(true);
         $signatureBytes = $backend->sign($hashBytes, $signRequest->algorithm);
+        $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
+
+        $this->logger->debug('sign completed', [
+            'key'        => $keyName,
+            'algorithm'  => $signRequest->algorithm,
+            'durationMs' => $durationMs,
+            'backend'    => $backend->getName(),
+        ]);
 
         $this->logger->info('Signing request processed', [
             'client' => $client->name,
@@ -74,15 +83,5 @@ final class SignController
         return new JsonResponse([
             'signature' => base64_encode($signatureBytes),
         ]);
-    }
-
-    private function extractBearerToken(Request $request): string
-    {
-        $header = $request->headers->get('Authorization', '');
-        if (! str_starts_with($header, 'Bearer ')) {
-            return '';
-        }
-
-        return substr($header, 7);
     }
 }

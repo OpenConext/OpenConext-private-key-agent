@@ -15,7 +15,7 @@ use function strlen;
 
 final class SignRequest
 {
-    public const array ALGORITHMS = [
+    private const array ALGORITHMS = [
         'rsa-pkcs1-v1_5-sha1',
         'rsa-pkcs1-v1_5-sha256',
         'rsa-pkcs1-v1_5-sha384',

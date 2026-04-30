@@ -7,16 +7,23 @@ namespace App\Config;
 use App\Exception\InvalidConfigurationException;
 use Symfony\Component\Yaml\Yaml;
 
+use function array_diff;
+use function array_unique;
 use function array_values;
 use function count;
 use function file_exists;
-use function in_array;
+use function gettype;
+use function implode;
 use function is_array;
 use function is_string;
+use function preg_match;
 use function sprintf;
+use function strlen;
 
 final class ConfigLoader
 {
+    private const array VALID_OPERATIONS = ['sign', 'decrypt'];
+
     public static function load(string $path): AgentConfig
     {
         if (! file_exists($path)) {
@@ -27,15 +34,11 @@ final class ConfigLoader
 
         self::validateStructure($data);
 
-        $backends = self::parseBackends($data['backend_groups'] ?? []);
-        $keys     = self::parseKeys($data['keys'] ?? [], $backends);
-        $clients  = self::parseClients($data['clients'] ?? []);
-
-        self::validateNoOrphanBackends($backends, $keys);
+        $keys    = self::parseKeys($data['keys'] ?? []);
+        $clients = self::parseClients($data['clients'] ?? []);
 
         return new AgentConfig(
             agentName: $data['agent_name'],
-            backends: array_values($backends),
             keys: $keys,
             clients: $clients,
         );
@@ -51,81 +54,42 @@ final class ConfigLoader
             throw new InvalidConfigurationException('Config must contain a non-empty string agent_name');
         }
 
+        if (isset($data['keys']) && ! is_array($data['keys'])) {
+            throw new InvalidConfigurationException('Config "keys" must be a YAML sequence');
+        }
+
+        if (empty($data['keys'])) {
+            throw new InvalidConfigurationException('At least one key must be configured');
+        }
+
         if (! isset($data['clients']) || ! is_array($data['clients']) || count($data['clients']) === 0) {
             throw new InvalidConfigurationException('At least one client must be configured');
         }
     }
 
     /**
-     * @param array<mixed> $groups
-     *
-     * @return array<string, BackendGroupConfig> Indexed by name
-     */
-    private static function parseBackends(array $groups): array
-    {
-        $backends = [];
-        foreach ($groups as $group) {
-            $name = $group['name'] ?? throw new InvalidConfigurationException('Backend group must have a name');
-            $type = $group['type'] ?? throw new InvalidConfigurationException(sprintf('Backend group "%s" must have a type', $name));
-
-            if (! in_array($type, ['openssl', 'pkcs11'], true)) {
-                throw new InvalidConfigurationException(sprintf('Backend group "%s" has invalid type "%s"', $name, $type));
-            }
-
-            if ($type === 'openssl' && empty($group['key_path'])) {
-                throw new InvalidConfigurationException(sprintf('OpenSSL backend group "%s" must have key_path', $name));
-            }
-
-            if ($type === 'pkcs11') {
-                if (empty($group['pkcs11_lib'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_lib', $name));
-                }
-
-                if (! isset($group['pkcs11_slot'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_slot', $name));
-                }
-
-                if (empty($group['pkcs11_key_label']) && empty($group['pkcs11_key_id'])) {
-                    throw new InvalidConfigurationException(sprintf('PKCS#11 backend group "%s" must have pkcs11_key_label or pkcs11_key_id', $name));
-                }
-            }
-
-            $environment = [];
-            if (isset($group['environment']) && is_array($group['environment'])) {
-                foreach ($group['environment'] as $envKey => $envValue) {
-                    $environment[(string) $envKey] = (string) $envValue;
-                }
-            }
-
-            $backends[$name] = new BackendGroupConfig(
-                name: $name,
-                type: $type,
-                keyPath: $group['key_path'] ?? null,
-                pkcs11Lib: $group['pkcs11_lib'] ?? null,
-                pkcs11Slot: isset($group['pkcs11_slot']) ? (int) $group['pkcs11_slot'] : null,
-                pkcs11Pin: $group['pkcs11_pin'] ?? null,
-                pkcs11KeyLabel: $group['pkcs11_key_label'] ?? null,
-                pkcs11KeyId: $group['pkcs11_key_id'] ?? null,
-                environment: $environment,
-            );
-        }
-
-        return $backends;
-    }
-
-    /**
-     * @param array<mixed>                      $keysData
-     * @param array<string, BackendGroupConfig> $backends
+     * @param array<mixed> $keysData
      *
      * @return list<KeyConfig>
      */
-    private static function parseKeys(array $keysData, array $backends): array
+    private static function parseKeys(array $keysData): array
     {
         $keys      = [];
         $seenNames = [];
 
         foreach ($keysData as $keyData) {
+            if (! is_array($keyData)) {
+                throw new InvalidConfigurationException('Each entry under "keys" must be a YAML mapping');
+            }
+
             $name = $keyData['name'] ?? throw new InvalidConfigurationException('Key must have a name');
+
+            if (! is_string($name) || ! preg_match('/^' . KeyName::PATTERN . '$/', $name)) {
+                throw new InvalidConfigurationException(sprintf(
+                    'Key name must match ' . KeyName::PATTERN . ', got: %s',
+                    is_string($name) ? $name : gettype($name),
+                ));
+            }
 
             if (isset($seenNames[$name])) {
                 throw new InvalidConfigurationException(sprintf('Duplicate key name: %s', $name));
@@ -133,25 +97,28 @@ final class ConfigLoader
 
             $seenNames[$name] = true;
 
-            $signingBackends    = $keyData['signing_backends'] ?? [];
-            $decryptionBackends = $keyData['decryption_backends'] ?? [];
-
-            foreach ($signingBackends as $ref) {
-                if (! isset($backends[$ref])) {
-                    throw new InvalidConfigurationException(sprintf('Key "%s" references unknown signing backend: %s', $name, $ref));
-                }
+            if (empty($keyData['key_path']) || ! is_string($keyData['key_path'])) {
+                throw new InvalidConfigurationException(sprintf('Key "%s" must have a key_path', $name));
             }
 
-            foreach ($decryptionBackends as $ref) {
-                if (! isset($backends[$ref])) {
-                    throw new InvalidConfigurationException(sprintf('Key "%s" references unknown decryption backend: %s', $name, $ref));
-                }
+            $operations = $keyData['operations'] ?? [];
+            if (! is_array($operations) || count($operations) === 0) {
+                throw new InvalidConfigurationException(sprintf('Key "%s" must have at least one operation', $name));
+            }
+
+            $unknown = array_diff(array_unique($operations), self::VALID_OPERATIONS);
+            if (count($unknown) > 0) {
+                throw new InvalidConfigurationException(sprintf(
+                    'Key "%s" has unknown operation(s): %s. Valid: sign, decrypt',
+                    $name,
+                    implode(', ', $unknown),
+                ));
             }
 
             $keys[] = new KeyConfig(
                 name: $name,
-                signingBackends: $signingBackends,
-                decryptionBackends: $decryptionBackends,
+                keyPath: $keyData['key_path'],
+                operations: array_values($operations),
             );
         }
 
@@ -165,46 +132,54 @@ final class ConfigLoader
      */
     private static function parseClients(array $clientsData): array
     {
-        $clients = [];
+        $clients   = [];
+        $seenNames = [];
+
         foreach ($clientsData as $clientData) {
-            $name  = $clientData['name'] ?? throw new InvalidConfigurationException('Client must have a name');
+            if (! is_array($clientData)) {
+                throw new InvalidConfigurationException('Each entry under "clients" must be a YAML mapping');
+            }
+
+            $name = $clientData['name'] ?? throw new InvalidConfigurationException('Client must have a name');
+
+            if (! is_string($name) || $name === '') {
+                throw new InvalidConfigurationException('Client name must be a non-empty string');
+            }
+
+            if (isset($seenNames[$name])) {
+                throw new InvalidConfigurationException(sprintf('Duplicate client name: %s', $name));
+            }
+
+            $seenNames[$name] = true;
+
             $token = $clientData['token'] ?? throw new InvalidConfigurationException(sprintf('Client "%s" must have a token', $name));
 
-            if (! is_string($token) || $token === '') {
-                throw new InvalidConfigurationException(sprintf('Client "%s" token must be a non-empty string', $name));
+            if (! is_string($token) || strlen($token) < 32) {
+                throw new InvalidConfigurationException(sprintf('Client "%s" token must be at least 32 characters long', $name));
+            }
+
+            $allowedKeys = $clientData['allowed_keys'] ?? null;
+
+            if ($allowedKeys === null || ! is_array($allowedKeys) || count($allowedKeys) === 0) {
+                throw new InvalidConfigurationException(sprintf('Client "%s" allowed_keys must be a non-empty list', $name));
+            }
+
+            foreach ($allowedKeys as $entry) {
+                if (! is_string($entry) || $entry === '') {
+                    throw new InvalidConfigurationException(sprintf(
+                        'Client "%s" allowed_keys entries must be non-empty strings',
+                        $name,
+                    ));
+                }
             }
 
             $clients[] = new ClientConfig(
                 name: $name,
                 token: $token,
-                allowedKeys: $clientData['allowed_keys'] ?? [],
+                allowedKeys: array_values($allowedKeys),
             );
         }
 
         return $clients;
-    }
-
-    /**
-     * @param array<string, BackendGroupConfig> $backends
-     * @param list<KeyConfig>                   $keys
-     */
-    private static function validateNoOrphanBackends(array $backends, array $keys): void
-    {
-        $referenced = [];
-        foreach ($keys as $key) {
-            foreach ($key->signingBackends as $ref) {
-                $referenced[$ref] = true;
-            }
-
-            foreach ($key->decryptionBackends as $ref) {
-                $referenced[$ref] = true;
-            }
-        }
-
-        foreach ($backends as $name => $backend) {
-            if (! isset($referenced[$name])) {
-                throw new InvalidConfigurationException(sprintf('Backend group "%s" is not referenced by any key (orphan)', $name));
-            }
-        }
     }
 }

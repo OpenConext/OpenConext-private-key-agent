@@ -2,8 +2,8 @@
 # tools/comprehensive-perf-test.sh
 #
 # Comprehensive stability and performance test for the private-key-agent.
-# Combines session-reuse monitoring, memory tracking, ZTS thread-safety stress,
-# and segfault detection across four distinct load phases.
+# Combines memory tracking, concurrency stress testing, and segfault detection
+# across four distinct load phases.
 #
 # Phases:
 #   1. Baseline        6c  ×  30s per endpoint   (~120s)
@@ -16,7 +16,8 @@
 # Usage:
 #   ./tools/comprehensive-perf-test.sh
 #   ./tools/comprehensive-perf-test.sh -v          # verbose: show raw hey output
-#   BASE_URL=https://agent.example.com ./tools/comprehensive-perf-test.sh
+#   ./tools/comprehensive-perf-test.sh --no-debug   # skip debug-logging activation
+#   BASE_URL=http://agent.example.com ./tools/comprehensive-perf-test.sh
 #
 # Requires: hey, curl, openssl, docker
 
@@ -26,12 +27,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/config/private-key-agent.yaml"
 COMPOSE_FILE="$PROJECT_ROOT/compose.yaml"
-BASE_URL="${BASE_URL:-https://localhost}"
+BASE_URL="${BASE_URL:-http://localhost}"
 VERBOSE=false
+ENABLE_DEBUG_LOGGING=true  # Enable debug logging by default for this comprehensive test
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -v|--verbose) VERBOSE=true; shift ;;
+        --no-debug)   ENABLE_DEBUG_LOGGING=false; shift ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -64,6 +67,42 @@ CONTAINER=$(docker compose -f "$COMPOSE_FILE" ps -q app 2>/dev/null | head -1)
 CONTAINER_NAME=$(docker compose -f "$COMPOSE_FILE" ps app 2>/dev/null | awk 'NR==2 {print $1}')
 [[ -n "$CONTAINER" ]] || die "App container not running — run: docker compose up -d"
 
+# ── Debug logging setup ──────────────────────────────────────────────────────
+
+ENV_FILE="$PROJECT_ROOT/.env"
+ORIG_LOG_LEVEL=$(grep '^LOG_LEVEL=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2 || echo "info")
+DEBUG_LOGGING_CHANGED=false
+
+if $ENABLE_DEBUG_LOGGING && [[ "$ORIG_LOG_LEVEL" != "debug" ]]; then
+    hdr "Enabling debug logging"
+    # macOS-compatible in-place sed (portable: write to temp then move)
+    sed "s/^LOG_LEVEL=.*/LOG_LEVEL=debug/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+    docker compose -f "$COMPOSE_FILE" up -d --force-recreate app >/dev/null 2>&1
+    # Wait for the container to be ready
+    _wait=0
+    until curl -sk "${BASE_URL}/health" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -q '200\|503'; do
+        sleep 1; _wait=$((_wait + 1))
+        [[ $_wait -lt 30 ]] || die "Container did not become ready after restart"
+    done
+    CONTAINER=$(docker compose -f "$COMPOSE_FILE" ps -q app 2>/dev/null | head -1)
+    CONTAINER_NAME=$(docker compose -f "$COMPOSE_FILE" ps app 2>/dev/null | awk 'NR==2 {print $1}')
+    DEBUG_LOGGING_CHANGED=true
+    ok "Debug logging enabled (was: $ORIG_LOG_LEVEL)"
+elif $ENABLE_DEBUG_LOGGING; then
+    ok "Debug logging already enabled (LOG_LEVEL=debug)"
+else
+    info "Running with LOG_LEVEL=$ORIG_LOG_LEVEL (use --no-debug to suppress this step)"
+fi
+
+restore_log_level() {
+    if $DEBUG_LOGGING_CHANGED; then
+        sed "s/^LOG_LEVEL=.*/LOG_LEVEL=$ORIG_LOG_LEVEL/" "$ENV_FILE" > "$ENV_FILE.tmp" \
+            && mv "$ENV_FILE.tmp" "$ENV_FILE"
+        docker compose -f "$COMPOSE_FILE" up -d --force-recreate app >/dev/null 2>&1 || true
+        info "Log level restored to $ORIG_LOG_LEVEL"
+    fi
+}
+
 # ── Helper: prepare ciphertexts ────────────────────────────────────────────────
 
 prepare_openssl_ciphertext() {
@@ -84,40 +123,6 @@ prepare_openssl_ciphertext() {
     $ok
 }
 
-prepare_hsm_ciphertext() {
-    local tmp_der; tmp_der=$(mktemp /tmp/pka-XXXXXX.der)
-    local tmp_pub; tmp_pub=$(mktemp /tmp/pka-XXXXXX.pem)
-    local tmp_enc; tmp_enc=$(mktemp /tmp/pka-XXXXXX)
-    local plaintext="dev-session-key-12345678"
-    local ok=true
-
-    docker compose -f "$COMPOSE_FILE" exec -T app sh -c "
-        pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
-            --login --pin 1234 --read-object --type pubkey \
-            --label test-signing-key --output-file /tmp/hsm-pubkey.der 2>/dev/null
-        cat /tmp/hsm-pubkey.der
-    " > "$tmp_der" 2>/dev/null || ok=false
-
-    if $ok; then
-        openssl pkey -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || openssl rsa -pubin -inform DER -in "$tmp_der" -out "$tmp_pub" 2>/dev/null \
-            || ok=false
-    fi
-
-    if $ok && [[ -s "$tmp_pub" ]]; then
-        printf '%s' "$plaintext" | openssl pkeyutl -encrypt \
-            -pubin -inkey "$tmp_pub" -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha1 -pkeyopt rsa_mgf1_md:sha1 \
-            -out "$tmp_enc" 2>/dev/null || ok=false
-    else
-        ok=false
-    fi
-
-    $ok && base64 < "$tmp_enc"
-    rm -f "$tmp_der" "$tmp_pub" "$tmp_enc"
-    $ok
-}
-
 # ── Helper: run a single benchmark and capture output ─────────────────────────
 
 run_bench() {
@@ -135,16 +140,19 @@ run_bench() {
         "$@" "$url" > "$out" 2>&1 || status=$?
 
     # Extract summary line from hey output
+    # NOTE: hey outputs percentile lines as "  50%% in 0.xxxx secs" (double %)
     local reqs_s avg p50 p95 p99 slowest total_reqs http200 errors
-    reqs_s=$(grep  'Requests/sec' "$out"    | awk '{print $2}')
-    avg=$(grep     'Average:' "$out"        | awk '{printf "%.1fms", $2*1000}' | head -1)
-    p50=$(grep     '50% in' "$out"          | awk '{printf "%.1fms", $3*1000}' | head -1)
-    p95=$(grep     '95% in' "$out"          | awk '{printf "%.1fms", $3*1000}' | head -1)
-    p99=$(grep     '99% in' "$out"          | awk '{printf "%.1fms", $3*1000}' | head -1)
-    slowest=$(grep 'Slowest:' "$out"        | awk '{printf "%.1fms", $2*1000}' | head -1)
-    total_reqs=$(grep 'Total:' "$out"       | awk '{print $2}' | head -1)
-    http200=$(grep '^\[200\]' "$out"        | awk '{print $2}' | head -1)
-    errors=$(grep  -E '^\[([^2]|\d{3}[^0])' "$out" | awk 'BEGIN{s=0} {s+=$2} END{print s}')
+    reqs_s=$(grep  'Requests/sec' "$out"      | awk '{print $2}')
+    avg=$(grep     'Average:' "$out"           | awk '{printf "%.1fms", $2*1000}' | head -1)
+    p50=$(grep     '50%% in' "$out"            | awk '{printf "%.1fms", $3*1000}' | head -1)
+    p95=$(grep     '95%% in' "$out"            | awk '{printf "%.1fms", $3*1000}' | head -1)
+    p99=$(grep     '99%% in' "$out"            | awk '{printf "%.1fms", $3*1000}' | head -1)
+    slowest=$(grep 'Slowest:' "$out"           | awk '{printf "%.1fms", $2*1000}' | head -1)
+    # Total requests = sum of all status code response counts
+    total_reqs=$(grep -E '^\s+\[[0-9]+\]' "$out" | awk '{s+=$2} END{print s+0}')
+    http200=$(grep '\[200\]' "$out"            | awk '{print $2}' | head -1)
+    errors=$(grep -E '^\s+\[([^2][0-9]{2}|2[^0][0-9]|20[^0])\]' "$out" \
+                | awk 'BEGIN{s=0} {s+=$2} END{print s}')
     [[ -z "$errors" ]] && errors=0
 
     # Include non-HTTP transport errors
@@ -184,12 +192,6 @@ run_phase() {
         "$concurrency" "$duration" \
         -d "$SIGN_BODY" || warn "sign/dev-signing-key phase had errors"
 
-    # --- Sign SoftHSM ---
-    run_bench "$phase_label" "sign/hsm-key" \
-        "${BASE_URL}/sign/hsm-key" \
-        "$concurrency" "$duration" \
-        -d "$SIGN_BODY" || warn "sign/hsm-key phase had errors"
-
     # --- Decrypt OpenSSL ---
     if [[ -n "${OPENSSL_DECRYPT_BODY:-}" ]]; then
         run_bench "$phase_label" "decrypt/dev-decryption-key" \
@@ -199,16 +201,6 @@ run_phase() {
     else
         warn "decrypt/dev-decryption-key skipped (ciphertext not available)"
     fi
-
-    # --- Decrypt SoftHSM ---
-    if [[ -n "${HSM_DECRYPT_BODY:-}" ]]; then
-        run_bench "$phase_label" "decrypt/hsm-key" \
-            "${BASE_URL}/decrypt/hsm-key" \
-            "$concurrency" "$duration" \
-            -d "$HSM_DECRYPT_BODY" || warn "decrypt/hsm-key phase had errors"
-    else
-        warn "decrypt/hsm-key skipped (ciphertext not available)"
-    fi
 }
 
 # ── Prepare payloads ──────────────────────────────────────────────────────────
@@ -216,7 +208,6 @@ run_phase() {
 hdr "Preparing test payloads"
 
 OPENSSL_DECRYPT_BODY=""
-HSM_DECRYPT_BODY=""
 
 OPENSSL_DEC_PEM="$PROJECT_ROOT/config/keys/dev-decryption.pem"
 if [[ -f "$OPENSSL_DEC_PEM" ]]; then
@@ -230,13 +221,6 @@ else
     warn "dev-decryption.pem not found — decrypt/dev-decryption-key will be skipped"
 fi
 
-if CT=$(prepare_hsm_ciphertext 2>/dev/null); then
-    HSM_DECRYPT_BODY="{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha1\",\"encrypted_data\":\"$CT\"}"
-    ok "SoftHSM ciphertext prepared"
-else
-    warn "Could not prepare HSM ciphertext — decrypt/hsm-key will be skipped"
-fi
-
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 
 hdr "Sanity checks"
@@ -244,7 +228,7 @@ hdr "Sanity checks"
 HASH=$(printf '%s' 'perf-test-payload' | openssl dgst -sha256 -binary | base64)
 SIGN_BODY="{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}"
 
-for ep in sign/dev-signing-key sign/hsm-key; do
+for ep in sign/dev-signing-key; do
     status=$(curl -sk -X POST -H "Authorization: Bearer $BEARER_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$SIGN_BODY" -o /dev/null -w "%{http_code}" "${BASE_URL}/$ep")
@@ -290,7 +274,7 @@ collect_stats() {
 
 collect_stats &
 STATS_PID=$!
-trap 'kill "$STATS_PID" 2>/dev/null || true' EXIT
+trap 'kill "$STATS_PID" 2>/dev/null || true; wait "$STATS_PID" 2>/dev/null || true; restore_log_level' EXIT
 
 ok "Docker stats collector started (PID $STATS_PID, sampling every 10s)"
 
@@ -317,18 +301,20 @@ run_phase "Phase4-Recovery" 6 30s
 END_TIME=$(date +%s)
 TOTAL_SECONDS=$((END_TIME - START_TIME))
 
-# ── Stop stats collector ──────────────────────────────────────────────────────
-
-kill "$STATS_PID" 2>/dev/null || true
-trap - EXIT
-
-# ── Collect post-run container state ─────────────────────────────────────────
+# ── Collect post-run container state (before restore_log_level recreates the container) ──
 
 hdr "Post-run analysis"
 
 RESTART_COUNT_AFTER=$(docker inspect --format='{{.RestartCount}}' "$CONTAINER" 2>/dev/null || echo "?")
 EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' "$CONTAINER" 2>/dev/null || echo "?")
 OOM_KILLED=$(docker inspect --format='{{.State.OOMKilled}}' "$CONTAINER" 2>/dev/null || echo "?")
+
+# ── Stop stats collector ──────────────────────────────────────────────────────
+
+kill "$STATS_PID" 2>/dev/null || true
+wait "$STATS_PID" 2>/dev/null || true   # reap the process to suppress bash's "Terminated" message
+restore_log_level
+trap - EXIT
 
 info "RestartCount after test: $RESTART_COUNT_AFTER (was: $RESTART_COUNT_BEFORE)"
 info "Last ExitCode: $EXIT_CODE"
@@ -337,51 +323,59 @@ info "OOMKilled: $OOM_KILLED"
 # ── Collect and analyze container logs ────────────────────────────────────────
 
 LOG_FILE="$RESULTS_DIR/container-logs.txt"
-docker compose -f "$COMPOSE_FILE" logs app 2>/dev/null > "$LOG_FILE" || true
+# Use a relative --since to limit to this test run only (Docker doesn't accept Unix timestamps)
+ELAPSED_SECS=$(( $(date +%s) - START_TIME ))
+SINCE_MINUTES=$(( (ELAPSED_SECS / 60) + 5 ))
+docker logs --since "${SINCE_MINUTES}m" "$CONTAINER" > "$LOG_FILE" 2>&1 || true
 
-# Count session events
-SESSION_NEW=$(grep -c '"Opened new PKCS#11 session"' "$LOG_FILE" 2>/dev/null || echo 0)
-SESSION_REUSED=$(grep -c '"Reusing existing PKCS#11 session"' "$LOG_FILE" 2>/dev/null || echo 0)
-WORKER_STARTS=$(grep -c '"Worker started"' "$LOG_FILE" 2>/dev/null || echo 0)
-WORKER_RECYCLES=$(grep -c '"Worker recycling"' "$LOG_FILE" 2>/dev/null || echo 0)
+# Disable errexit for log analysis: grep -c exits 1 on zero matches
+set +e
 
-# Count sign/decrypt operations
-SIGN_OPS=$(grep -c '"PKCS#11 sign completed"' "$LOG_FILE" 2>/dev/null || echo 0)
-DECRYPT_OPS=$(grep -c '"PKCS#11 decrypt completed"' "$LOG_FILE" 2>/dev/null || echo 0)
+# Count sign/decrypt operations — matches the debug-level log emitted by the controllers
+# (requires LOG_LEVEL=debug; falls back to info-level messages if debug not available)
+SIGN_OPS=$(grep -c '"sign completed"' "$LOG_FILE" 2>/dev/null); SIGN_OPS=${SIGN_OPS:-0}
+[[ "$SIGN_OPS" -eq 0 ]] && { SIGN_OPS=$(grep -c 'Signing request processed' "$LOG_FILE" 2>/dev/null); SIGN_OPS=${SIGN_OPS:-0}; }
+DECRYPT_OPS=$(grep -c '"decrypt completed"' "$LOG_FILE" 2>/dev/null); DECRYPT_OPS=${DECRYPT_OPS:-0}
+[[ "$DECRYPT_OPS" -eq 0 ]] && { DECRYPT_OPS=$(grep -c 'Decryption request processed' "$LOG_FILE" 2>/dev/null); DECRYPT_OPS=${DECRYPT_OPS:-0}; }
 
 # Segfault / fatal error detection
-SEGFAULTS=$(grep -ciE 'segfault|sigsegv|signal 11|fatal error' "$LOG_FILE" 2>/dev/null || echo 0)
-PKCS11_ERRORS=$(grep -c '"PKCS#11.*error' "$LOG_FILE" 2>/dev/null || echo 0)
-SESSION_ERRORS=$(grep -c '"PKCS#11 session error' "$LOG_FILE" 2>/dev/null || echo 0)
+SEGFAULTS=$(grep -ciE 'segfault|sigsegv|signal 11|fatal error' "$LOG_FILE" 2>/dev/null); SEGFAULTS=${SEGFAULTS:-0}
+# Backend errors: look for ERROR/CRITICAL level log entries (Symfony logs unhandled 5xx as CRITICAL)
+BACKEND_ERRORS=$(grep -cE '"level_name":"(ERROR|CRITICAL)"' "$LOG_FILE" 2>/dev/null); BACKEND_ERRORS=${BACKEND_ERRORS:-0}
 
-# Compute session reuse rate
-TOTAL_SESSION_OPS=$((SESSION_NEW + SESSION_REUSED))
-if [[ $TOTAL_SESSION_OPS -gt 0 ]]; then
-    REUSE_RATE=$(awk "BEGIN{printf \"%.3f%%\", ($SESSION_REUSED / $TOTAL_SESSION_OPS) * 100}")
-else
-    REUSE_RATE="N/A"
-fi
+set -e
 
-# Sign operation timing (from debug logs) — extract durationMs values
+# Sign operation timing (from debug logs) — extracts durationMs logged at debug level
 SIGN_TIMING_FILE="$RESULTS_DIR/sign-timing.txt"
-grep '"PKCS#11 sign completed"' "$LOG_FILE" 2>/dev/null \
-    | grep -o '"durationMs":[0-9]*' | cut -d: -f2 > "$SIGN_TIMING_FILE" || true
+grep '"sign completed"' "$LOG_FILE" 2>/dev/null \
+    | grep -oE '"durationMs":[0-9]+' | cut -d: -f2 > "$SIGN_TIMING_FILE" || true
 
+# Decrypt operation timing
 DECRYPT_TIMING_FILE="$RESULTS_DIR/decrypt-timing.txt"
-grep '"PKCS#11 decrypt completed"' "$LOG_FILE" 2>/dev/null \
-    | grep -o '"durationMs":[0-9]*' | cut -d: -f2 > "$DECRYPT_TIMING_FILE" || true
+grep '"decrypt completed"' "$LOG_FILE" 2>/dev/null \
+    | grep -oE '"durationMs":[0-9]+' | cut -d: -f2 > "$DECRYPT_TIMING_FILE" || true
 
 compute_stats() {
     local file="$1"
-    local count min max avg p95 p99
+    local count
     count=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
     if [[ "${count:-0}" -gt 0 ]]; then
-        min=$(sort -n "$file" | head -1)
-        max=$(sort -n "$file" | tail -1)
-        avg=$(awk '{s+=$1;c++} END{if(c>0) printf "%.1f", s/c; else print "?"}' "$file")
-        p95=$(sort -n "$file" | awk -v p=95 'BEGIN{n=0} {a[n++]=$1} END{idx=int(n*p/100); print a[idx]}')
-        p99=$(sort -n "$file" | awk -v p=99 'BEGIN{n=0} {a[n++]=$1} END{idx=int(n*p/100); print a[idx]}')
-        echo "n=$count min=${min}ms avg=${avg}ms p95=${p95}ms p99=${p99}ms max=${max}ms"
+        sort -n "$file" | awk -v n="$count" '
+            BEGIN { i=0 }
+            {
+                a[i++] = $1
+                s += $1
+            }
+            END {
+                min = a[0]
+                max = a[n-1]
+                avg = s/n
+                p95 = a[int(n*0.95)]
+                p99 = a[int(n*0.99)]
+                printf "n=%d min=%dms avg=%.1fms p95=%dms p99=%dms max=%dms\n", \
+                    n, min, avg, p95, p99, max
+            }
+        '
     else
         echo "no data"
     fi
@@ -395,13 +389,22 @@ MEM_FILE="$RESULTS_DIR/mem-parsed.txt"
 # Extract numeric MiB values from "X.XXXGiB / Y.YYGiB" or "XXXMiB / YYYMiB" format
 grep -v '^timestamp' "$STATS_FILE" 2>/dev/null | awk -F',' '
 {
+    # The mem field is "36MiB / 15.6GiB" — only consider the used portion (before " / ")
     mem=$2
-    # Handle GiB
-    if (match(mem, /([0-9.]+)GiB/, arr)) { val=arr[1]*1024 }
+    sub(/ \/.*/, "", mem)   # strip " / <limit>" — POSIX-compatible
+    val=0
+    # Handle GiB — 2-arg match (POSIX-compatible, works on macOS nawk and gawk)
+    if (match(mem, /[0-9.]+GiB/)) {
+        n=substr(mem, RSTART, RLENGTH-3)+0; val=n*1024
+    }
     # Handle MiB
-    else if (match(mem, /([0-9.]+)MiB/, arr)) { val=arr[1] }
+    else if (match(mem, /[0-9.]+MiB/)) {
+        val=substr(mem, RSTART, RLENGTH-3)+0
+    }
     # Handle kB
-    else if (match(mem, /([0-9.]+)kB/, arr)) { val=arr[1]/1024 }
+    else if (match(mem, /[0-9.]+kB/)) {
+        n=substr(mem, RSTART, RLENGTH-2)+0; val=n/1024
+    }
     else next
     print val
 }
@@ -448,25 +451,23 @@ log "  Total wall-clock time : ${TOTAL_SECONDS}s"
 log ""
 
 log "  ${BOLD}Stability${NC}"
-log "  Container restarts    : $((RESTART_COUNT_AFTER - RESTART_COUNT_BEFORE))"
+if [[ "$RESTART_COUNT_AFTER" =~ ^[0-9]+$ ]] && [[ "$RESTART_COUNT_BEFORE" =~ ^[0-9]+$ ]]; then
+    RESTART_DELTA=$((RESTART_COUNT_AFTER - RESTART_COUNT_BEFORE))
+else
+    RESTART_DELTA="?"
+fi
+log "  Container restarts    : $RESTART_DELTA"
 log "  OOM killed            : $OOM_KILLED"
 log "  Last exit code        : $EXIT_CODE"
 log "  Segfaults detected    : $SEGFAULTS"
-log "  Session errors        : $SESSION_ERRORS"
-log "  PKCS#11 error logs    : $PKCS11_ERRORS"
+log "  Backend errors        : $BACKEND_ERRORS"
+log "  Sign ops logged       : $SIGN_OPS"
+log "  Decrypt ops logged    : $DECRYPT_OPS"
 log ""
 
-log "  ${BOLD}Session Reuse${NC}"
-log "  New PKCS#11 sessions  : $SESSION_NEW"
-log "  Sessions reused       : $SESSION_REUSED"
-log "  Session reuse rate    : $REUSE_RATE"
-log "  Worker starts         : $WORKER_STARTS"
-log "  Worker recycles       : $WORKER_RECYCLES"
-log ""
-
-log "  ${BOLD}PKCS#11 Operation Timing (SoftHSM, from debug logs)${NC}"
-log "  Sign   : $SIGN_TIMING_SUMMARY"
-log "  Decrypt: $DECRYPT_TIMING_SUMMARY"
+log "  ${BOLD}Operation Timing (from debug logs)${NC}"
+log "  Sign    : $SIGN_TIMING_SUMMARY"
+log "  Decrypt : $DECRYPT_TIMING_SUMMARY"
 log ""
 
 log "  ${BOLD}Container Memory (Docker stats, 10s samples)${NC}"
@@ -479,19 +480,26 @@ log "  Total errors          : $TOTAL_ERRORS"
 log ""
 
 log "  ${BOLD}Per-phase breakdown${NC}"
-printf "  %-22s %-12s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
-    "Phase/Endpoint" "Backend" "Reqs/s" "Avg" "p50" "p95" "p99" "Slowest" "HTTP200"
+printf "  %-26s %-20s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
+    "Phase/Endpoint" "Key" "Reqs/s" "Avg" "p50" "p95" "p99" "Slowest" "HTTP200"
 printf "  %s\n" "$(printf '─%.0s' {1..100})"
 
-while IFS='|' read -r line; do
-    declare -A F=()
-    while IFS='=' read -r k v; do F["$k"]="$v"; done < <(tr '|' '\n' <<< "$line")
-    printf "  %-22s %-12s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n" \
-        "${F[PHASE]}/${F[LABEL]#*/}" \
-        "$(echo "${F[LABEL]}" | grep -o 'hsm-key\|dev-signing\|dev-decrypt\|openssl' || echo '-')" \
-        "${F[REQS_S]}" "${F[AVG]}" "${F[P50]}" "${F[P95]}" "${F[P99]}" "${F[SLOWEST]}" \
-        "${F[HTTP200]}"
-done < "$BENCH_FILE" 2>/dev/null || true
+awk -F'|' '
+{
+    # Parse key=value fields from pipe-delimited line (bash 3.x compatible, no declare -A)
+    for(i=1;i<=NF;i++){
+        n=index($i,"="); k=substr($i,1,n-1); v=substr($i,n+1)
+        f[k]=v
+    }
+    phase=f["PHASE"]; label=f["LABEL"]
+    # Strip leading path prefix for endpoint column (e.g. "sign/dev-signing-key" → "signing-key")
+    key=label; sub(/.*dev-/, "dev-", key); sub(/-key$/, "-key", key)
+    # Endpoint: phase + "/" + short label (strip "dev-signing-key" prefix)
+    ep=phase"/"label; sub(/.*\//,"",ep)
+    printf "  %-26s %-20s %-8s %-10s %-8s %-8s %-8s %-8s %-10s\n",
+        ep, key, f["REQS_S"], f["AVG"], f["P50"], f["P95"], f["P99"], f["SLOWEST"], f["HTTP200"]
+}
+' "$BENCH_FILE" 2>/dev/null || true
 
 log ""
 log "  Raw data saved to: ${GRAY}$RESULTS_DIR${NC}"

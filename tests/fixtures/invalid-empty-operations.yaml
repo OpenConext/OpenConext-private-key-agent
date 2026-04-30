@@ -1,0 +1,12 @@
+agent_name: test-agent
+
+keys:
+  - name: my-key
+    key_path: /tmp/test-key.pem
+    operations: []
+
+clients:
+  - name: test-client
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys:
+      - my-key

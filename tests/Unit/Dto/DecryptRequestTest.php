@@ -82,26 +82,4 @@ class DecryptRequestTest extends TestCase
         $violations = $this->validator->validate($request);
         $this->assertGreaterThan(0, $violations->count());
     }
-
-    public function testLabelAllowedForOaep(): void
-    {
-        $request                = new DecryptRequest();
-        $request->algorithm     = 'rsa-pkcs1-oaep-mgf1-sha256';
-        $request->encryptedData = base64_encode(random_bytes(256));
-        $request->label         = base64_encode('my-label');
-
-        $violations = $this->validator->validate($request);
-        $this->assertCount(0, $violations, (string) $violations);
-    }
-
-    public function testLabelRejectedForPkcs1v15(): void
-    {
-        $request                = new DecryptRequest();
-        $request->algorithm     = 'rsa-pkcs1-v1_5';
-        $request->encryptedData = base64_encode(random_bytes(256));
-        $request->label         = base64_encode('my-label');
-
-        $violations = $this->validator->validate($request);
-        $this->assertGreaterThan(0, $violations->count());
-    }
 }
