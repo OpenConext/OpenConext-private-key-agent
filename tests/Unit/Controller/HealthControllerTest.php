@@ -94,8 +94,9 @@ class HealthControllerTest extends TestCase
 
         $this->assertSame(404, $response->getStatusCode());
         $body = json_decode((string) $response->getContent(), true);
-        $this->assertSame('not_found', $body['status']);
-        $this->assertSame('no-such-key', $body['key_name']);
+        $this->assertSame(404, $body['status']);
+        $this->assertSame('not_found', $body['error']);
+        $this->assertStringContainsString('no-such-key', $body['message']);
     }
 
     public function testKeyHealthReturns503WhenKeyIsUnhealthy(): void

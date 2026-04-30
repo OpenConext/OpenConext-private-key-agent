@@ -12,6 +12,7 @@ use Symfony\Component\Routing\Attribute\Route;
 use function array_unique;
 use function array_values;
 use function count;
+use function sprintf;
 
 final class HealthController
 {
@@ -51,8 +52,9 @@ final class HealthController
 
         if ($backend === null) {
             return new JsonResponse([
-                'status'   => 'not_found',
-                'key_name' => $keyName,
+                'status'  => 404,
+                'error'   => 'not_found',
+                'message' => sprintf('Key "%s" not found', $keyName),
             ], 404);
         }
 

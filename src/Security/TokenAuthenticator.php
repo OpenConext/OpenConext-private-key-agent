@@ -61,7 +61,7 @@ final class TokenAuthenticator implements AuthenticatorInterface
      */
     private function recordFailure(Request $request, string $message): never
     {
-        $ip        = $request->server->get('REMOTE_ADDR', 'unknown');
+        $ip        = $request->getClientIp() ?? 'unknown';
         $rateLimit = $this->authFailureLimiter->create($ip)->consume(1);
 
         if (! $rateLimit->isAccepted()) {

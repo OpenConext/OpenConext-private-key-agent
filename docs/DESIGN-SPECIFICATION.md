@@ -190,11 +190,11 @@ The agent enforces a **failure-only sliding-window rate limit** on the `POST /si
 
 #### Implementation
 
-Rate limiting is implemented with Symfony's `RateLimiter` component backed by APCu shared memory. APCu is installed in the production Docker image (`pecl install apcu`) and enabled in `docker/app.ini`. Because the service runs under Apache with `mod_php` (prefork model), the APCu shared memory segment is shared across all Apache child processes — the limit is enforced per IP across the entire server, not per worker.
+Rate limiting is implemented with Symfony's `RateLimiter` component backed by the filesystem cache adapter (`cache.adapter.filesystem`). The rate limiter state is written to `var/cache/{env}/pools/` on the local disk, which is shared across all Apache worker processes within the same container — the per-IP failure count is enforced across the entire server.
 
-In the `test` environment, the APCu pool is replaced with an in-memory array adapter so that PHPUnit tests run without APCu available in CLI.
+In the `test` environment, the filesystem pool is replaced with an in-memory array adapter so that PHPUnit tests run in isolation without touching disk state.
 
-> **PHP-FPM incompatibility.** APCu is per-process in PHP-FPM: each worker has an isolated memory segment, so failure counts are not shared across workers. A client could exhaust its limit on one worker and immediately get fresh tokens on another — the per-IP limit would not be enforced. The APCu backend is only correct under **mod_php + Apache prefork**, where all Apache child processes share the same APCu mmap segment. If the deployment model changes to PHP-FPM, replace the `cache.rate_limiter` pool in `config/packages/cache.yaml` with a network-shared backend (Redis or Memcached). No other code changes are required.
+> **Load-balanced deployments.** The filesystem adapter stores state on the local disk of each container replica. When the agent is deployed with multiple replicas behind a load balancer, each replica maintains its own independent failure counter. A client can distribute up to *N × 5* attempts across *N* replicas before any single replica blocks them. For load-balanced multi-replica deployments, replace the `cache.rate_limiter` pool adapter in `config/packages/cache.yaml` with a network-shared backend such as Redis (`cache.adapter.redis`) or Memcached (`cache.adapter.memcached`). No other code changes are required.
 
 #### 429 response example
 
@@ -808,7 +808,7 @@ Four stages:
 
 - **`vendor`**: `composer:2` image. Installs production Composer dependencies (`--no-dev`) into `/var/www/html/vendor`. Running `composer install` here avoids the need for `zip`/`git` tooling in the runtime image.
 - **`vendor-dev`**: `composer:2` image. Installs all Composer dependencies (including dev) into `/var/www/html/vendor`. Used exclusively by the `dev` stage.
-- **`prod`**: `ghcr.io/openconext/openconext-basecontainers/php85-apache2` (Debian, PHP 8.5 with Apache 2.4). Copies the vendor directory from `vendor`, copies application source, generates an optimised classmap autoloader, installs PHP OPcache and APCu settings from `docker/app.ini`, deploys the Apache vhost from `docker/apache-app.conf`, and pre-warms the Symfony cache (`APP_DEBUG=0`). APCu is compiled and enabled via `pecl install apcu && docker-php-ext-enable apcu` (the base image does not ship APCu). The web root is `/var/www/html`.
+- **`prod`**: `ghcr.io/openconext/openconext-basecontainers/php85-apache2` (Debian, PHP 8.5 with Apache 2.4). Copies the vendor directory from `vendor`, copies application source, generates an optimised classmap autoloader, installs PHP OPcache settings from `docker/app.ini`, deploys the Apache vhost from `docker/apache-app.conf`, and pre-warms the Symfony cache (`APP_DEBUG=0`). The web root is `/var/www/html`.
 - **`dev`**: Extends `prod`. Replaces the vendor directory with the one from `vendor-dev` (adds dev dependencies) and regenerates the autoloader. Used by `compose.yaml`.
 
 ### PHP configuration (`docker/app.ini`)

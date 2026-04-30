@@ -2,7 +2,7 @@ framework:
     cache:
         pools:
             cache.rate_limiter:
-                adapter: cache.adapter.apcu
+                adapter: cache.adapter.filesystem
 
 when@test:
     framework:

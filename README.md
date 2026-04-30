@@ -45,7 +45,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 - **Static bearer-token authentication** (RFC 6750): each client has a pre-shared token; tokens are compared with `hash_equals()` to prevent timing attacks.
 - **Brute-force rate limiting:** sliding-window limiter (5 failures / 60 s per IP); only failed authentication attempts are counted — the success path has zero overhead.
 - **Per-client key authorisation:** each client declares the key names it may use.
-- **Fail-fast configuration:** invalid or missing config prevents the PHP-FPM worker from starting.
+- **Fail-fast configuration:** invalid or missing config prevents the application container from starting.
 - **Health endpoints:** `/health` and `/health/key/{key_name}` for liveness probes and monitoring.
 
 ### Technology stack
@@ -449,7 +449,9 @@ The `POST /sign` and `POST /decrypt` endpoints apply a **failure-only sliding-wi
 
 **Only failed authentication attempts are counted.** Requests with a valid bearer token never touch the rate limiter, so there is no performance impact on normal high-frequency usage. The IP key is taken from `REMOTE_ADDR` (not `X-Forwarded-For`) to prevent clients from spoofing a shared proxy IP.
 
-Rate limit state is stored in APCu shared memory, which is shared across all Apache worker processes within the same host. In the test environment the in-memory array adapter is used instead.
+Rate limit state is stored on disk using the filesystem cache adapter, shared across all Apache worker processes within the same container. In the test environment the in-memory array adapter is used instead.
+
+> **Load-balanced deployments.** With multiple replicas behind a load balancer, each replica maintains its own failure counter on local disk. For cross-replica enforcement, replace the `cache.rate_limiter` pool adapter in `config/packages/cache.yaml` with a network-shared backend (Redis or Memcached).
 
 ### Interactive API documentation (Swagger UI)
 

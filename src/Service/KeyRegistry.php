@@ -6,7 +6,6 @@ namespace App\Service;
 
 use App\Backend\BackendInterface;
 use App\Backend\DecryptionBackendInterface;
-use App\Backend\OpenSslBackend;
 use App\Backend\SigningBackendInterface;
 use App\Exception\KeyNotFoundException;
 
@@ -16,14 +15,14 @@ use function sprintf;
 
 final class KeyRegistry implements KeyRegistryInterface
 {
-    /** @var array<string, OpenSslBackend> */
+    /** @var array<string, SigningBackendInterface&DecryptionBackendInterface> */
     private array $backends = [];
 
     /** @var array<string, list<string>> */
     private array $operations = [];
 
     /** @param list<string> $operations */
-    public function register(string $keyName, OpenSslBackend $backend, array $operations): void
+    public function register(string $keyName, SigningBackendInterface&DecryptionBackendInterface $backend, array $operations): void
     {
         $this->backends[$keyName]   = $backend;
         $this->operations[$keyName] = $operations;

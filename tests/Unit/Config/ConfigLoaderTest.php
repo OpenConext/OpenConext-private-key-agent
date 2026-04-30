@@ -149,7 +149,32 @@ YAML;
 
         try {
             $this->expectException(InvalidConfigurationException::class);
-            $this->expectExceptionMessage('non-empty');
+            $this->expectExceptionMessage('at least 32 characters');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnShortClientToken(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: short-token
+    allowed_keys: [k1]
+YAML;
+        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('at least 32 characters');
             ConfigLoader::load($tmpFile);
         } finally {
             unlink($tmpFile);

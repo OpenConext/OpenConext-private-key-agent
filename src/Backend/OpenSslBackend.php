@@ -70,7 +70,7 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
 
     public function isHealthy(): bool
     {
-        return true;
+        return openssl_pkey_get_details($this->privateKey) !== false;
     }
 
     public function sign(string $hash, string $algorithm): string

@@ -18,6 +18,7 @@ use function is_array;
 use function is_string;
 use function preg_match;
 use function sprintf;
+use function strlen;
 
 final class ConfigLoader
 {
@@ -153,8 +154,8 @@ final class ConfigLoader
 
             $token = $clientData['token'] ?? throw new InvalidConfigurationException(sprintf('Client "%s" must have a token', $name));
 
-            if (! is_string($token) || $token === '') {
-                throw new InvalidConfigurationException(sprintf('Client "%s" token must be a non-empty string', $name));
+            if (! is_string($token) || strlen($token) < 32) {
+                throw new InvalidConfigurationException(sprintf('Client "%s" token must be at least 32 characters long', $name));
             }
 
             $allowedKeys = $clientData['allowed_keys'] ?? null;
