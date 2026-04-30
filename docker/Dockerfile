@@ -21,7 +21,9 @@ RUN pecl install apcu \
 
 WORKDIR /var/www/html
 
-ENV COMPOSER_HOME=/tmp/composer
+ENV COMPOSER_HOME=/tmp/composer \
+    APP_ENV=prod \
+    DEFAULT_URI=http://localhost
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY --from=vendor /var/www/html/vendor ./vendor
@@ -36,14 +38,9 @@ RUN composer dump-autoload --optimize --classmap-authoritative
 COPY docker/app.ini /usr/local/etc/php/conf.d/app.ini
 COPY docker/apache-app.conf /etc/apache2/sites-enabled/000-default.conf
 
-ARG APP_ENV=prod
-ARG APP_DEBUG=0
-ARG APP_SECRET=build-time-placeholder
-ARG LOG_LEVEL=info
-ARG DEFAULT_URI=http://localhost
-
-RUN APP_ENV=${APP_ENV} APP_DEBUG=${APP_DEBUG} APP_SECRET=${APP_SECRET} LOG_LEVEL=${LOG_LEVEL} DEFAULT_URI=${DEFAULT_URI} php bin/console cache:warmup \
-    && chown -R www-data:www-data /var/www/html/var
+COPY docker/entrypoint-app.sh /entrypoint-app.sh
+RUN chmod +x /entrypoint-app.sh
+ENTRYPOINT ["/entrypoint-app.sh"]
 
 # ---- Development stage (extends prod with all dev tooling) ----
 FROM prod AS dev
@@ -53,7 +50,3 @@ COPY tests/ ./tests/
 COPY phpcs.xml phpunit.xml.dist phpstan.neon phpstan-baseline.neon .phplint.yml ./
 RUN composer dump-autoload \
     && chown -R www-data:www-data /var/www/html
-
-COPY docker/entrypoint-dev.sh /entrypoint-dev.sh
-RUN chmod +x /entrypoint-dev.sh
-ENTRYPOINT ["/entrypoint-dev.sh"]
