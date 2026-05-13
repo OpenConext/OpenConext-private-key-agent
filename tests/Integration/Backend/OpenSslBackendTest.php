@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Integration\Backend;
+namespace OpenConext\PrivateKeyAgent\Tests\Integration\Backend;
 
-use App\Backend\OpenSslBackend;
-use App\Exception\BackendException;
-use App\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

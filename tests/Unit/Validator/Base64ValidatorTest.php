@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Validator;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Validator;
 
-use App\Validator\Base64;
-use App\Validator\Base64Validator;
+use OpenConext\PrivateKeyAgent\Validator\Base64;
+use OpenConext\PrivateKeyAgent\Validator\Base64Validator;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Backend;
+namespace OpenConext\PrivateKeyAgent\Backend;
 
-use App\Crypto\DigestInfoBuilder;
-use App\Exception\BackendException;
-use App\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenSSLAsymmetricKey;
 
 use function file_get_contents;

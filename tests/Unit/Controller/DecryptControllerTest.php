@@ -2,17 +2,17 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Controller;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Controller;
 
-use App\Backend\DecryptionBackendInterface;
-use App\Config\AgentConfig;
-use App\Config\ClientConfig;
-use App\Controller\DecryptController;
-use App\Exception\AuthenticationException;
-use App\Exception\InvalidRequestException;
-use App\Security\AccessControlService;
-use App\Security\TokenAuthenticator;
-use App\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\Backend\DecryptionBackendInterface;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Controller\DecryptController;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Security\AccessControlService;
+use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;

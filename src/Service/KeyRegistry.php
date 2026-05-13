@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Service;
+namespace OpenConext\PrivateKeyAgent\Service;
 
-use App\Backend\BackendInterface;
-use App\Backend\DecryptionBackendInterface;
-use App\Backend\SigningBackendInterface;
-use App\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Backend\BackendInterface;
+use OpenConext\PrivateKeyAgent\Backend\DecryptionBackendInterface;
+use OpenConext\PrivateKeyAgent\Backend\SigningBackendInterface;
+use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
 
 use function array_values;
 use function in_array;

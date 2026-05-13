@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Service;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Service;
 
-use App\Config\AgentConfig;
-use App\Config\ClientConfig;
-use App\Config\KeyConfig;
-use App\Service\KeyRegistryBootstrapper;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Config\KeyConfig;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryBootstrapper;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 

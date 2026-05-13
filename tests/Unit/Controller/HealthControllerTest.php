@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Controller;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Controller;
 
-use App\Backend\BackendInterface;
-use App\Controller\HealthController;
-use App\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\Backend\BackendInterface;
+use OpenConext\PrivateKeyAgent\Controller\HealthController;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
 use PHPUnit\Framework\TestCase;
 
 use function json_decode;

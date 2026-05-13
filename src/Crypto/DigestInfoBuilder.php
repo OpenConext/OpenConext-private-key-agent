@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Crypto;
+namespace OpenConext\PrivateKeyAgent\Crypto;
 
 use InvalidArgumentException;
 

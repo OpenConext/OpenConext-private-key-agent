@@ -32,12 +32,12 @@
     },
     "autoload": {
         "psr-4": {
-            "App\\": "src/"
+            "OpenConext\\PrivateKeyAgent\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "App\\Tests\\": "tests/"
+            "OpenConext\\PrivateKeyAgent\\Tests\\": "tests/"
         }
     },
     "config": {

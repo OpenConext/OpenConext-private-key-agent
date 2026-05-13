@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Backend;
+namespace OpenConext\PrivateKeyAgent\Backend;
 
 interface BackendInterface
 {

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Config;
+namespace OpenConext\PrivateKeyAgent\Config;
 
-use App\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
 
 final class ConfigProvider
 {

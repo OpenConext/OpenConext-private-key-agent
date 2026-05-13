@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Dto;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Dto;
 
-use App\Dto\SignRequest;
+use OpenConext\PrivateKeyAgent\Dto\SignRequest;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Validator\Validator\ValidatorInterface;

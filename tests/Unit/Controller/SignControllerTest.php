@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Controller;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Controller;
 
-use App\Backend\SigningBackendInterface;
-use App\Config\AgentConfig;
-use App\Config\ClientConfig;
-use App\Controller\SignController;
-use App\Exception\AccessDeniedException;
-use App\Exception\AuthenticationException;
-use App\Exception\InvalidRequestException;
-use App\Exception\KeyNotFoundException;
-use App\Security\AccessControlService;
-use App\Security\TokenAuthenticator;
-use App\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\Backend\SigningBackendInterface;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Controller\SignController;
+use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Security\AccessControlService;
+use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;

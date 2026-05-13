@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Service;
+namespace OpenConext\PrivateKeyAgent\Service;
 
-use App\Backend\OpenSslBackend;
-use App\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
 use Psr\Log\LoggerInterface;
 
 final class KeyRegistryBootstrapper

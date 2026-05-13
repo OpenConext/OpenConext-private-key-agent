@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Command;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Command;
 
-use App\Command\ValidateConfigCommand;
+use OpenConext\PrivateKeyAgent\Command\ValidateConfigCommand;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;

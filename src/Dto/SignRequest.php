@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Dto;
+namespace OpenConext\PrivateKeyAgent\Dto;
 
-use App\Validator as AppAssert;
+use OpenConext\PrivateKeyAgent\Validator as AppAssert;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
 

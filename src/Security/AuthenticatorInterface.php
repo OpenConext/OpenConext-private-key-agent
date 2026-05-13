@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Security;
+namespace OpenConext\PrivateKeyAgent\Security;
 
-use App\Config\ClientConfig;
-use App\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
 use Symfony\Component\HttpFoundation\Request;
 
 interface AuthenticatorInterface

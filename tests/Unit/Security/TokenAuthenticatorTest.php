@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Security;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Security;
 
-use App\Config\AgentConfig;
-use App\Config\ClientConfig;
-use App\Exception\AuthenticationException;
-use App\Exception\RateLimitException;
-use App\Security\TokenAuthenticator;
 use DateTimeImmutable;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\RateLimitException;
+use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\RateLimiter\LimiterInterface;

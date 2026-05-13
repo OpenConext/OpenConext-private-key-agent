@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Backend;
+namespace OpenConext\PrivateKeyAgent\Backend;
 
-use App\Exception\BackendException;
-use App\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 
 interface DecryptionBackendInterface extends BackendInterface
 {

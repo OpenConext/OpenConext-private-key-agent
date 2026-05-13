@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Config;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Config;
 
-use App\Config\ConfigLoader;
-use App\Exception\InvalidConfigurationException;
+use OpenConext\PrivateKeyAgent\Config\ConfigLoader;
+use OpenConext\PrivateKeyAgent\Exception\InvalidConfigurationException;
 use PHPUnit\Framework\TestCase;
 
 use function file_put_contents;

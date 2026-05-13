@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Config;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Config;
 
-use App\Config\ConfigProvider;
-use App\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Config\ConfigProvider;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
 use PHPUnit\Framework\TestCase;
 
 class ConfigProviderTest extends TestCase

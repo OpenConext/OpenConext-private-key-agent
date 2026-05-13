@@ -20,7 +20,7 @@
         <ini name="error_reporting" value="-1"/>
         <env name="APP_ENV" value="test"/>
         <env name="APP_SECRET" value="test-secret-not-for-production"/>
-        <env name="KERNEL_CLASS" value="App\Kernel"/>
+        <env name="KERNEL_CLASS" value="OpenConext\PrivateKeyAgent\Kernel"/>
 
         <!-- ###+ symfony/framework-bundle ### -->
         <env name="APP_SECRET" value=""/>

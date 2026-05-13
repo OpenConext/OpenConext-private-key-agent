@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Exception;
+namespace OpenConext\PrivateKeyAgent\Exception;
 
 use RuntimeException;
 use Throwable;

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Command;
+namespace OpenConext\PrivateKeyAgent\Command;
 
-use App\Config\ConfigLoader;
+use OpenConext\PrivateKeyAgent\Config\ConfigLoader;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;

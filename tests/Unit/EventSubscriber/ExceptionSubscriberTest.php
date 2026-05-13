@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\EventSubscriber;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\EventSubscriber;
 
-use App\Config\AgentConfig;
-use App\EventSubscriber\ExceptionSubscriber;
-use App\Exception\AccessDeniedException;
-use App\Exception\AuthenticationException;
-use App\Exception\BackendException;
-use App\Exception\InvalidRequestException;
-use App\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\EventSubscriber\ExceptionSubscriber;
+use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;

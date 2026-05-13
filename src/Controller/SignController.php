@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace App\Controller;
+namespace OpenConext\PrivateKeyAgent\Controller;
 
-use App\Config\KeyName;
-use App\Dto\SignRequest;
-use App\Exception\InvalidRequestException;
-use App\Security\AccessControlInterface;
-use App\Security\AuthenticatorInterface;
-use App\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\Config\KeyName;
+use OpenConext\PrivateKeyAgent\Dto\SignRequest;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Security\AccessControlInterface;
+use OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;

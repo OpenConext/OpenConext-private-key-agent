@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Controller;
+namespace OpenConext\PrivateKeyAgent\Controller;
 
-use App\Config\KeyName;
-use App\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\Config\KeyName;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
 

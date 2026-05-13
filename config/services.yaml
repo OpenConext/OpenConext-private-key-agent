@@ -6,36 +6,36 @@ services:
         autowire: true
         autoconfigure: true
 
-    App\:
+    OpenConext\PrivateKeyAgent\:
         resource: '../src/'
         exclude:
             - '../src/Kernel.php'
 
     # Config provider as singleton
-    App\Config\ConfigProvider:
+    OpenConext\PrivateKeyAgent\Config\ConfigProvider:
         lazy: true
         arguments:
             $configPath: '%env(string:PRIVATE_KEY_AGENT_CONFIG)%'
 
     # Expose AgentConfig from the provider
-    App\Config\AgentConfig:
-        factory: ['@App\Config\ConfigProvider', 'getConfig']
+    OpenConext\PrivateKeyAgent\Config\AgentConfig:
+        factory: ['@OpenConext\PrivateKeyAgent\Config\ConfigProvider', 'getConfig']
 
     # Create and populate KeyRegistry using KeyRegistryBootstrapper factory
-    App\Service\KeyRegistry:
-        factory: ['@App\Service\KeyRegistryBootstrapper', 'createRegistry']
+    OpenConext\PrivateKeyAgent\Service\KeyRegistry:
+        factory: ['@OpenConext\PrivateKeyAgent\Service\KeyRegistryBootstrapper', 'createRegistry']
         arguments:
-            - '@App\Config\AgentConfig'
+            - '@OpenConext\PrivateKeyAgent\Config\AgentConfig'
 
     # Wiring for services that need AgentConfig
-    App\Security\TokenAuthenticator:
+    OpenConext\PrivateKeyAgent\Security\TokenAuthenticator:
         arguments:
-            $config: '@App\Config\AgentConfig'
+            $config: '@OpenConext\PrivateKeyAgent\Config\AgentConfig'
             $authFailureLimiter: '@limiter.auth_failure'
 
-    App\EventSubscriber\ExceptionSubscriber:
+    OpenConext\PrivateKeyAgent\EventSubscriber\ExceptionSubscriber:
         arguments:
-            $config: '@App\Config\AgentConfig'
+            $config: '@OpenConext\PrivateKeyAgent\Config\AgentConfig'
 
-    App\Security\AuthenticatorInterface: '@App\Security\TokenAuthenticator'
-    App\Security\AccessControlInterface: '@App\Security\AccessControlService'
+    OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface: '@OpenConext\PrivateKeyAgent\Security\TokenAuthenticator'
+    OpenConext\PrivateKeyAgent\Security\AccessControlInterface: '@OpenConext\PrivateKeyAgent\Security\AccessControlService'

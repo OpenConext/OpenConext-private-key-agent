@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Security;
+namespace OpenConext\PrivateKeyAgent\Security;
 
-use App\Config\ClientConfig;
-use App\Exception\AccessDeniedException;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
 
 interface AccessControlInterface
 {

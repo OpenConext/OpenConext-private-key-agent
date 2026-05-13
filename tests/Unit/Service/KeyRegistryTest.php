@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Service;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Service;
 
-use App\Backend\OpenSslBackend;
-use App\Exception\KeyNotFoundException;
-use App\Service\KeyRegistry;
+use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
+use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Service\KeyRegistry;
 use PHPUnit\Framework\TestCase;
 
 use function file_exists;

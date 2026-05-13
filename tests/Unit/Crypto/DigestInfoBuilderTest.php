@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Crypto;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Crypto;
 
-use App\Crypto\DigestInfoBuilder;
 use InvalidArgumentException;
+use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
 use PHPUnit\Framework\TestCase;
 
 use function hex2bin;

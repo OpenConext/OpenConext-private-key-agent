@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Security;
+namespace OpenConext\PrivateKeyAgent\Security;
 
-use App\Config\AgentConfig;
-use App\Config\ClientConfig;
-use App\Exception\AuthenticationException;
-use App\Exception\RateLimitException;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\RateLimitException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 

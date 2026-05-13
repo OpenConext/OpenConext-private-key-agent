@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace App\EventSubscriber;
+namespace OpenConext\PrivateKeyAgent\EventSubscriber;
 
-use App\Config\AgentConfig;
-use App\Exception\AccessDeniedException;
-use App\Exception\AuthenticationException;
-use App\Exception\BackendException;
-use App\Exception\InvalidRequestException;
-use App\Exception\KeyNotFoundException;
-use App\Exception\RateLimitException;
+use OpenConext\PrivateKeyAgent\Config\AgentConfig;
+use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
+use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Exception\RateLimitException;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Security;
+namespace OpenConext\PrivateKeyAgent\Tests\Unit\Security;
 
-use App\Config\ClientConfig;
-use App\Exception\AccessDeniedException;
-use App\Security\AccessControlService;
+use OpenConext\PrivateKeyAgent\Config\ClientConfig;
+use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
+use OpenConext\PrivateKeyAgent\Security\AccessControlService;
 use PHPUnit\Framework\TestCase;
 
 class AccessControlServiceTest extends TestCase

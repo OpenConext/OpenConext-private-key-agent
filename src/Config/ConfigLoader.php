@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Config;
+namespace OpenConext\PrivateKeyAgent\Config;
 
-use App\Exception\InvalidConfigurationException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidConfigurationException;
 use Symfony\Component\Yaml\Yaml;
 
 use function array_diff;
