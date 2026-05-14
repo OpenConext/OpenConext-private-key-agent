@@ -294,8 +294,9 @@ Response `404`:
 
 ```json
 {
-  "status": "not_found",
-  "key_name": "unknown-name"
+  "status": 404,
+  "error": "not_found",
+  "message": "Key \"unknown-name\" not found"
 }
 ```
 
@@ -400,11 +401,11 @@ Each entry in `keys` defines a logical key identity backed by a single PEM file.
 | `src/Command/` | Symfony console commands; currently `ValidateConfigCommand` for offline configuration validation |
 | `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, key, and client configuration |
 | `src/Controller/` | REST API controllers: `SignController`, `DecryptController`, `HealthController` |
-| `src/Crypto/` | Low-level cryptographic utilities; currently `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing) |
+| `src/Crypto/` | Low-level cryptographic utilities: `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing), `SigningAlgorithm` and `EncryptionAlgorithm` (algorithm identifier constants) |
 | `src/ValueObject/` | Immutable input value objects (`SigningInput`, `DecryptionInput`) that validate and decode request data in their constructors |
 | `src/EventSubscriber/` | `ExceptionSubscriber` maps domain exceptions to RFC 6750 HTTP error responses |
 | `src/Exception/` | Domain exception hierarchy (`AuthenticationException`, `AccessDeniedException`, `BackendException`, `InvalidRequestException`, `InvalidConfigurationException`) |
-| `src/Security/` | Authentication (`TokenAuthenticator`) and key-level access control (`AccessControlService`) |
+| `src/Security/` | Authentication (`AuthenticatorInterface`, `TokenAuthenticator`) and key-level access control (`AccessControlInterface`, `AccessControlService`) |
 | `src/Service/` | Key registry (`KeyRegistry`, `KeyRegistryBootstrapper`, `KeyRegistryInterface`) — maps logical key names to backend instances |
 | `tests/Unit/` | Unit tests using mocks; no I/O or cryptographic operations required |
 | `tests/Integration/` | Integration tests for the OpenSSL backends against real key material |
@@ -467,21 +468,28 @@ classDiagram
     }
     KeyRegistryBootstrapper --> ConfigProvider
 
-    class TokenAuthenticator {
-        +authenticate(token) ClientConfig
+    class AuthenticatorInterface {
+        <<interface>>
+        +authenticate(request) ClientConfig
     }
-    class AccessControlService {
-        +assertAccess(client, keyName)
+    class TokenAuthenticator
+    AuthenticatorInterface <|.. TokenAuthenticator
+
+    class AccessControlInterface {
+        <<interface>>
+        +checkAccess(client, keyName)
     }
+    class AccessControlService
+    AccessControlInterface <|.. AccessControlService
 
     class SignController
     class DecryptController
     class HealthController
-    SignController --> TokenAuthenticator
-    SignController --> AccessControlService
+    SignController --> AuthenticatorInterface
+    SignController --> AccessControlInterface
     SignController --> KeyRegistryInterface
-    DecryptController --> TokenAuthenticator
-    DecryptController --> AccessControlService
+    DecryptController --> AuthenticatorInterface
+    DecryptController --> AccessControlInterface
     DecryptController --> KeyRegistryInterface
     HealthController --> KeyRegistryInterface
 ```
@@ -528,7 +536,7 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 ### `TokenAuthenticator`
 
 - Implements the custom `AuthenticatorInterface` (not Symfony's `AbstractAuthenticator`).
-- Is a plain Symfony service; controllers call `$this->authenticator->authenticate($token)` directly, bypassing the Symfony Security firewall.
+- Is a plain Symfony service; controllers call `$this->authenticator->authenticate($request)` directly, bypassing the Symfony Security firewall.
 - Extracts the Bearer token from the `Authorization` header.
 - Iterates configured clients and compares tokens using `hash_equals()`.
 - Returns the matched `ClientConfig` as the authenticated entity.
@@ -552,26 +560,6 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
   - `BackendException` → 500
   - Unhandled exceptions → 500
 
-### Backend Interfaces
-
-```php
-interface BackendInterface
-{
-    /**
-     * Returns the backend group name (as configured in YAML).
-     */
-    public function getName(): string;
-
-    /**
-     * Returns true if the backend is operational (key loaded successfully, etc.).
-     */
-    public function isHealthy(): bool;
-
-    /**
-     * Returns a hex SHA-256 fingerprint derived solely from the RSA public key modulus.
-     * Used lazily to verify that all backends sharing a key_name hold the same key.
-     * The fingerprint is not secret and may be logged.
-     */
 ### Backend Interfaces
 
 ```php
@@ -684,18 +672,11 @@ Both classes follow the same pattern:
 ```php
 final readonly class SigningInput
 {
-    private const array ALGORITHMS = [
-        'rsa-pkcs1-v1_5-sha1',
-        'rsa-pkcs1-v1_5-sha256',
-        'rsa-pkcs1-v1_5-sha384',
-        'rsa-pkcs1-v1_5-sha512',
-    ];
-
     private const array HASH_LENGTHS = [
-        'rsa-pkcs1-v1_5-sha1'   => 20,
-        'rsa-pkcs1-v1_5-sha256' => 32,
-        'rsa-pkcs1-v1_5-sha384' => 48,
-        'rsa-pkcs1-v1_5-sha512' => 64,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA1   => 20,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA256 => 32,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA384 => 48,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA512 => 64,
     ];
 
     public string $hashBytes;
@@ -717,15 +698,6 @@ Properties exposed after successful construction:
 ```php
 final readonly class DecryptionInput
 {
-    private const array ALGORITHMS = [
-        'rsa-pkcs1-v1_5',
-        'rsa-pkcs1-oaep-mgf1-sha1',
-        'rsa-pkcs1-oaep-mgf1-sha224',
-        'rsa-pkcs1-oaep-mgf1-sha256',
-        'rsa-pkcs1-oaep-mgf1-sha384',
-        'rsa-pkcs1-oaep-mgf1-sha512',
-    ];
-
     public string $ciphertextBytes;
 
     private function __construct(public string $algorithm, string $encryptedDataBase64) { ... }
@@ -764,12 +736,13 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
   "require": {
     "php": "^8.5",
     "symfony/console": "^7.4",
+    "symfony/flex": "^2.0",
     "symfony/framework-bundle": "^7.4",
     "symfony/monolog-bundle": "^3.10",
     "symfony/property-access": "^7.4",
     "symfony/runtime": "^7.4",
-    "symfony/security-bundle": "^7.4",
     "symfony/serializer": "^7.4",
+    "symfony/translation-contracts": "^3.7",
     "symfony/yaml": "^7.4"
   },
   "require-dev": {
@@ -781,8 +754,7 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
     "phpstan/phpstan-symfony": "^2.0",
     "phpunit/phpunit": "^11.0",
     "squizlabs/php_codesniffer": "^4.0",
-    "symfony/dotenv": "^8.0",
-    "symfony/test-pack": "^1.0"
+    "symfony/dotenv": "^7.4"
   }
 }
 ```
