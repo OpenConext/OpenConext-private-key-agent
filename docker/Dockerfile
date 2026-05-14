@@ -28,7 +28,6 @@ COPY bin/ ./bin/
 COPY config/ ./config/
 COPY public/ ./public/
 COPY src/ ./src/
-COPY templates/ ./templates/
 RUN composer dump-autoload --optimize --classmap-authoritative
 
 COPY docker/app.ini /usr/local/etc/php/conf.d/app.ini
