@@ -7,7 +7,7 @@ namespace OpenConext\PrivateKeyAgent\Exception;
 use RuntimeException;
 use Throwable;
 
-class AuthenticationException extends RuntimeException
+final class AuthenticationException extends RuntimeException
 {
     public function __construct(string $message = 'Authentication required', Throwable|null $previous = null)
     {

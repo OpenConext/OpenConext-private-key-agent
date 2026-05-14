@@ -7,7 +7,7 @@ namespace OpenConext\PrivateKeyAgent\Exception;
 use RuntimeException;
 use Throwable;
 
-class InvalidRequestException extends RuntimeException
+final class InvalidRequestException extends RuntimeException
 {
     public function __construct(string $message = 'Invalid request', Throwable|null $previous = null)
     {

@@ -7,7 +7,7 @@ namespace OpenConext\PrivateKeyAgent\Exception;
 use RuntimeException;
 use Throwable;
 
-class AccessDeniedException extends RuntimeException
+final class AccessDeniedException extends RuntimeException
 {
     public function __construct(string $message = 'Access denied', Throwable|null $previous = null)
     {
