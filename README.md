@@ -16,10 +16,10 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 
 | Operation | Client sends | Agent returns |
 |---|---|---|
-| `POST /sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
-| `POST /decrypt/{key_name}` | Base64-encoded `encrypted_data` + algorithm | Base64-encoded `decrypted_data` (symmetric key) |
-| `GET /health` | — | Overall health status |
-| `GET /health/key/{key_name}` | — | Per-key health status |
+| `POST /v1/sign/{key_name}` | Base64-encoded hash + algorithm | Base64-encoded RSA signature |
+| `POST /v1/decrypt/{key_name}` | Base64-encoded `encrypted_data` + algorithm | Base64-encoded `decrypted_data` (symmetric key) |
+| `GET /v1/health` | — | Overall health status |
+| `GET /v1/health/key/{key_name}` | — | Per-key health status |
 
 **The private key never leaves the agent.** Only cryptographic inputs and outputs cross the network boundary.
 
@@ -46,7 +46,7 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 - **Brute-force rate limiting:** sliding-window limiter (5 failures / 60 s per IP); only failed authentication attempts are counted — the success path has zero overhead.
 - **Per-client key authorisation:** each client declares the key names it may use.
 - **Fail-fast configuration:** invalid or missing config prevents the application container from starting.
-- **Health endpoints:** `/health` and `/health/key/{key_name}` for liveness probes and monitoring.
+- **Health endpoints:** `/v1/health` and `/v1/health/key/{key_name}` for liveness probes and monitoring.
 
 ### Technology stack
 
@@ -374,7 +374,7 @@ The agent is designed to be used with the [`simplesamlphp/xml-security`](https:/
 When SimpleSAMLphp signs a SAML Response:
 
 1. `xml-security` C14N-transforms the element, computes a SHA digest of the result, builds `ds:SignedInfo`, and calls `SignatureBackend::sign($key, $plaintext)` with the canonicalized `ds:SignedInfo` bytes.
-2. The adapter **hashes the plaintext locally** (e.g. SHA-256) and calls `POST /sign/{key_name}` with the Base64-encoded hash and algorithm.
+2. The adapter **hashes the plaintext locally** (e.g. SHA-256) and calls `POST /v1/sign/{key_name}` with the Base64-encoded hash and algorithm.
 3. The agent constructs the DigestInfo ASN.1 structure internally and returns the RSA signature.
 4. The adapter returns the raw signature bytes; `xml-security` embeds them in `ds:SignatureValue`.
 
@@ -383,7 +383,7 @@ When SimpleSAMLphp signs a SAML Response:
 When SimpleSAMLphp decrypts an encrypted SAML Assertion:
 
 1. `xml-security` extracts the RSA-encrypted session key from `xenc:CipherValue` and calls `EncryptionBackend::decrypt($key, $ciphertext)` with those bytes.
-2. The adapter calls `POST /decrypt/{key_name}` with the Base64-encoded `encrypted_data` and `algorithm`.
+2. The adapter calls `POST /v1/decrypt/{key_name}` with the Base64-encoded `encrypted_data` and `algorithm`.
 3. The agent RSA-decrypts the session key and returns it.
 4. `xml-security` uses the session key to AES-decrypt the assertion content.
 
@@ -408,7 +408,7 @@ class PrivateKeyAgentSignatureBackend implements SignatureBackend
         $algorithm = 'rsa-pkcs1-v1_5-sha256';
         $hash = base64_encode(hash('sha256', $plaintext, true));
 
-        $response = $this->post("/sign/{$this->keyName}", [
+        $response = $this->post("/v1/sign/{$this->keyName}", [
             'algorithm' => $algorithm,
             'hash'      => $hash,
         ]);
@@ -428,18 +428,22 @@ For the full sequence diagrams and integration notes see [DESIGN-SPECIFICATION.m
 
 ## API reference
 
+For the complete API documentation — endpoints, request/response schemas, error codes, and compatibility policy — see **[docs/api.md](docs/api.md)**.
+
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/sign/{key_name}` | Bearer token | Sign a hash |
-| `POST` | `/decrypt/{key_name}` | Bearer token | Decrypt ciphertext |
-| `GET` | `/health` | None | Overall health |
-| `GET` | `/health/key/{key_name}` | None | Per-key health |
+| `POST` | `/v1/sign/{key_name}` | Bearer token | Sign a hash |
+| `POST` | `/v1/decrypt/{key_name}` | Bearer token | Decrypt ciphertext |
+| `GET` | `/v1/health` | None | Overall health |
+| `GET` | `/v1/health/key/{key_name}` | None | Per-key health |
 
-Error responses follow RFC 6750 and always include `status`, `error`, and an optional `message` field. On `401` a `WWW-Authenticate` header is also returned. On `429` a `Retry-After` header is returned indicating the number of seconds until the rate-limit window resets.
+> **Compatibility policy:** The agent ignores unknown JSON fields in request bodies, so clients can add fields without breaking the server. All `/v1/` URLs are stable — breaking changes will be introduced under a new `/v2/` prefix.
+
+Error responses follow RFC 6750 and always include `status`, `error`, and `message` fields. On `401` a `WWW-Authenticate` header is also returned. On `429` a `Retry-After` header is returned indicating the number of seconds until the rate-limit window resets.
 
 ### Rate limiting
 
-The `POST /sign` and `POST /decrypt` endpoints apply a **failure-only sliding-window rate limit** per caller IP to protect against bearer-token brute-force attacks.
+The `POST /v1/sign` and `POST /v1/decrypt` endpoints apply a **failure-only sliding-window rate limit** per caller IP to protect against bearer-token brute-force attacks.
 
 | Parameter | Value |
 |---|---|
@@ -452,31 +456,6 @@ The `POST /sign` and `POST /decrypt` endpoints apply a **failure-only sliding-wi
 Rate limit state is stored on disk using the filesystem cache adapter, shared across all Apache worker processes within the same container. In the test environment the in-memory array adapter is used instead.
 
 > **Load-balanced deployments.** With multiple replicas behind a load balancer, each replica maintains its own failure counter on local disk. For cross-replica enforcement, replace the `cache.rate_limiter` pool adapter in `config/packages/cache.yaml` with a network-shared backend (Redis or Memcached).
-
-### Interactive API documentation (Swagger UI)
-
-The application serves an interactive OpenAPI/Swagger UI powered by [NelmioApiDocBundle](https://github.com/nelmio/NelmioApiDocBundle). It is available in all environments (no authentication required).
-
-| URL | What it serves |
-|-----|---------------|
-| `http://localhost/api/doc` | Swagger UI — interactive browser for all endpoints |
-| `http://localhost/api/doc.json` | Raw OpenAPI 3 JSON — import into Postman, Insomnia, etc. |
-
-**Using the Swagger UI:**
-
-1. Start the stack: `docker compose up -d`
-2. Open `http://localhost/api/doc` in your browser.
-3. Each endpoint lists its request schema, required fields, and example values. Click **Try it out** to send a live request.
-4. To authenticate, click the **Authorize** button (lock icon at the top) and enter your bearer token. The token is written to `config/private-key-agent.yaml` by `setup-dev.sh`.
-
-**Importing the OpenAPI spec:**
-
-```bash
-# Download the spec to a local file
-curl http://localhost/api/doc.json -o openapi.json
-```
-
-Import `openapi.json` into any OpenAPI-compatible tool (Postman, Insomnia, Bruno, etc.) to generate a pre-configured collection with all request schemas.
 
 ---
 

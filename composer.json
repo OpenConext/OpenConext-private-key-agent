@@ -18,7 +18,6 @@
     },
     "require-dev": {
         "doctrine/coding-standard": "^14.0",
-        "nelmio/api-doc-bundle": "^5.10",
         "overtrue/phplint": "^9.7",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan": "^2.1",
@@ -26,9 +25,7 @@
         "phpstan/phpstan-symfony": "^2.0",
         "phpunit/phpunit": "^11.0",
         "squizlabs/php_codesniffer": "^4.0",
-        "symfony/asset": "^7.4",
-        "symfony/dotenv": "^7.4",
-        "symfony/twig-bundle": "^7.4"
+        "symfony/dotenv": "^7.4"
     },
     "autoload": {
         "psr-4": {

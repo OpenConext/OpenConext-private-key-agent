@@ -34,7 +34,7 @@ final class SignController
     ) {
     }
 
-    #[Route('/sign/{keyName}', name: 'sign', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
+    #[Route('/v1/sign/{keyName}', name: 'sign', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
     public function sign(Request $request, string $keyName): JsonResponse
     {
         $client = $this->authenticator->authenticate($request);

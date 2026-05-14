@@ -21,7 +21,7 @@ final class HealthController
     ) {
     }
 
-    #[Route('/health', name: 'health', methods: ['GET'])]
+    #[Route('/v1/health', name: 'health', methods: ['GET'])]
     public function health(): JsonResponse
     {
         $unhealthyNames = [];
@@ -45,7 +45,7 @@ final class HealthController
         return new JsonResponse(['status' => 'OK']);
     }
 
-    #[Route('/health/key/{keyName}', name: 'health_key', methods: ['GET'], requirements: ['keyName' => KeyName::PATTERN])]
+    #[Route('/v1/health/key/{keyName}', name: 'health_key', methods: ['GET'], requirements: ['keyName' => KeyName::PATTERN])]
     public function keyHealth(string $keyName): JsonResponse
     {
         $backend = $this->keyRegistry->findBackend($keyName);

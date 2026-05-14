@@ -106,17 +106,23 @@ command -v openssl >/dev/null 2>&1 || die "openssl is required"
 group_health() {
     echo -e "${BOLD}Health${NC}"
 
-    status=$(api GET /health)
-    check "GET /health" "$status" "200"
+    status=$(api GET /v1/health)
+    check "GET /v1/health" "$status" "200"
 
-    status=$(api GET /health/key/dev-signing-key)
-    check "GET /health/key/dev-signing-key" "$status" "200"
+    status=$(api_noauth GET /v1/health)
+    check "GET /v1/health (no token)" "$status" "200"
 
-    status=$(api GET /health/key/dev-decryption-key)
-    check "GET /health/key/dev-decryption-key" "$status" "200"
+    status=$(api GET /v1/health/key/dev-signing-key)
+    check "GET /v1/health/key/dev-signing-key" "$status" "200"
 
-    status=$(api GET /health/key/no-such-key)
-    check "GET /health/key/no-such-key → 404" "$status" "404"
+    status=$(api_noauth GET /v1/health/key/dev-signing-key)
+    check "GET /v1/health/key/dev-signing-key (no token)" "$status" "200"
+
+    status=$(api GET /v1/health/key/dev-decryption-key)
+    check "GET /v1/health/key/dev-decryption-key" "$status" "200"
+
+    status=$(api GET /v1/health/key/no-such-key)
+    check "GET /v1/health/key/no-such-key → 404" "$status" "404"
 
     echo ""
 }
@@ -128,16 +134,16 @@ group_auth() {
     # Use /sign to verify bearer token enforcement.
     HASH=$(printf '%s' 'hello' | openssl dgst -sha256 -binary | base64)
 
-    status=$(api_noauth POST /sign/dev-signing-key \
+    status=$(api_noauth POST /v1/sign/dev-signing-key \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
-    check "POST /sign (no token) → 401" "$status" "401"
+    check "POST /v1/sign (no token) → 401" "$status" "401"
 
-    status=$(api_noauth POST /sign/dev-signing-key \
+    status=$(api_noauth POST /v1/sign/dev-signing-key \
         -H "Authorization: Bearer wrong-token" \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
-    check "POST /sign (wrong token) → 401" "$status" "401"
+    check "POST /v1/sign (wrong token) → 401" "$status" "401"
 
     echo ""
 }
@@ -147,29 +153,29 @@ group_sign() {
 
     HASH=$(printf '%s' 'hello private-key-agent' | openssl dgst -sha256 -binary | base64)
 
-    status=$(api POST /sign/dev-signing-key \
+    status=$(api POST /v1/sign/dev-signing-key \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
-    check "POST /sign/dev-signing-key  (OpenSSL, sha256)" "$status" "200"
+    check "POST /v1/sign/dev-signing-key  (OpenSSL, sha256)" "$status" "200"
 
     # Key not in client's allowed list → 403
-    status=$(api POST /sign/unknown-key \
+    status=$(api POST /v1/sign/unknown-key \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}")
-    check "POST /sign/unknown-key      (unknown key) → 403" "$status" "403"
+    check "POST /v1/sign/unknown-key      (unknown key) → 403" "$status" "403"
 
     # Wrong hash length for algorithm → 400
     SHORT_HASH=$(printf '%s' 'x' | base64)
-    status=$(api POST /sign/dev-signing-key \
+    status=$(api POST /v1/sign/dev-signing-key \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$SHORT_HASH\"}")
-    check "POST /sign/dev-signing-key  (wrong hash length) → 400" "$status" "400"
+    check "POST /v1/sign/dev-signing-key  (wrong hash length) → 400" "$status" "400"
 
     # Missing algorithm field → 400
-    status=$(api POST /sign/dev-signing-key \
+    status=$(api POST /v1/sign/dev-signing-key \
         -H "Content-Type: application/json" \
         -d "{\"hash\":\"$HASH\"}")
-    check "POST /sign/dev-signing-key  (missing algorithm) → 400" "$status" "400"
+    check "POST /v1/sign/dev-signing-key  (missing algorithm) → 400" "$status" "400"
 
     echo ""
 }
@@ -194,26 +200,26 @@ group_decrypt() {
     OPENSSL_DEC_PEM="$PROJECT_ROOT/config/keys/dev-decryption.pem"
     if [[ -f "$OPENSSL_DEC_PEM" ]]; then
         CIPHERTEXT=$(encrypt_with_pem "$OPENSSL_DEC_PEM")
-        status=$(api POST /decrypt/dev-decryption-key \
+        status=$(api POST /v1/decrypt/dev-decryption-key \
             -H "Content-Type: application/json" \
             -d "{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha256\",\"encrypted_data\":\"$CIPHERTEXT\"}")
-        check "POST /decrypt/dev-decryption-key  (OpenSSL, OAEP-SHA256)" "$status" "200"
+        check "POST /v1/decrypt/dev-decryption-key  (OpenSSL, OAEP-SHA256)" "$status" "200"
     else
         echo -e "  ${YELLOW}⚠${NC} Skipped OpenSSL decrypt — run ./tools/setup-dev.sh first"
     fi
 
     # Missing ciphertext field → 400
-    status=$(api POST /decrypt/dev-decryption-key \
+    status=$(api POST /v1/decrypt/dev-decryption-key \
         -H "Content-Type: application/json" \
         -d '{"algorithm":"rsa-pkcs1-oaep-mgf1-sha256"}')
-    check "POST /decrypt/dev-decryption-key  (missing ciphertext) → 400" "$status" "400"
+    check "POST /v1/decrypt/dev-decryption-key  (missing ciphertext) → 400" "$status" "400"
 
     # Key not in client's allowed list → 403
     DUMMY=$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | base64)
-    status=$(api POST /decrypt/unknown-key \
+    status=$(api POST /v1/decrypt/unknown-key \
         -H "Content-Type: application/json" \
         -d "{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha256\",\"encrypted_data\":\"$DUMMY\"}")
-    check "POST /decrypt/unknown-key          (unknown key) → 403" "$status" "403"
+    check "POST /v1/decrypt/unknown-key          (unknown key) → 403" "$status" "403"
 
     echo ""
 }

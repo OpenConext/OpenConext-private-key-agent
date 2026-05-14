@@ -131,11 +131,11 @@ group_sign() {
 
     # OpenSSL backend
     echo -e "\n  ${BOLD}OpenSSL backend (dev-signing-key)${NC}"
-    if sanity_check "sign/dev-signing-key" "${BASE_URL}/sign/dev-signing-key" \
+    if sanity_check "sign/dev-signing-key" "${BASE_URL}/v1/sign/dev-signing-key" \
         -H "Content-Type: application/json" \
         -d "$SIGN_BODY"; then
-        run_bench "POST /sign/dev-signing-key (OpenSSL, RSA-PKCS1-v1.5-SHA256)" \
-            "${BASE_URL}/sign/dev-signing-key" \
+        run_bench "POST /v1/sign/dev-signing-key (OpenSSL, RSA-PKCS1-v1.5-SHA256)" \
+            "${BASE_URL}/v1/sign/dev-signing-key" \
             -d "$SIGN_BODY"
     fi
 
@@ -154,11 +154,11 @@ group_decrypt() {
     elif OPENSSL_CIPHERTEXT=$(prepare_openssl_ciphertext "$OPENSSL_DEC_PEM"); then
         DECRYPT_BODY="{\"algorithm\":\"rsa-pkcs1-oaep-mgf1-sha256\",\"encrypted_data\":\"$OPENSSL_CIPHERTEXT\"}"
 
-        if sanity_check "decrypt/dev-decryption-key" "${BASE_URL}/decrypt/dev-decryption-key" \
+        if sanity_check "decrypt/dev-decryption-key" "${BASE_URL}/v1/decrypt/dev-decryption-key" \
             -H "Content-Type: application/json" \
             -d "$DECRYPT_BODY"; then
-            run_bench "POST /decrypt/dev-decryption-key (OpenSSL, OAEP-SHA256)" \
-                "${BASE_URL}/decrypt/dev-decryption-key" \
+            run_bench "POST /v1/decrypt/dev-decryption-key (OpenSSL, OAEP-SHA256)" \
+                "${BASE_URL}/v1/decrypt/dev-decryption-key" \
                 -d "$DECRYPT_BODY"
         fi
     else

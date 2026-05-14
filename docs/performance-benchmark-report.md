@@ -66,8 +66,8 @@ Validation on production-grade hardware is required before making production cap
 
 | Endpoint | Key | Algorithm |
 |----------|-----|-----------|
-| `POST /sign/dev-signing-key` | dev-signing-key (RSA 2048) | `rsa-pkcs1-v1_5-sha256` |
-| `POST /decrypt/dev-decryption-key` | dev-decryption-key (RSA 2048) | `rsa-pkcs1-oaep-mgf1-sha256` |
+| `POST /v1/sign/dev-signing-key` | dev-signing-key (RSA 2048) | `rsa-pkcs1-v1_5-sha256` |
+| `POST /v1/decrypt/dev-decryption-key` | dev-decryption-key (RSA 2048) | `rsa-pkcs1-oaep-mgf1-sha256` |
 
 ### Instrumentation
 

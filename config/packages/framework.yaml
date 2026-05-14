@@ -13,7 +13,3 @@ framework:
         enabled: true
     validation:
         enabled: true
-
-when@dev:
-    framework:
-        assets: ~

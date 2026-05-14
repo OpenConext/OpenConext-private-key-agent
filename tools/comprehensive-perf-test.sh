@@ -80,7 +80,7 @@ if $ENABLE_DEBUG_LOGGING && [[ "$ORIG_LOG_LEVEL" != "debug" ]]; then
     docker compose -f "$COMPOSE_FILE" up -d --force-recreate app >/dev/null 2>&1
     # Wait for the container to be ready
     _wait=0
-    until curl -sk "${BASE_URL}/health" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -q '200\|503'; do
+    until curl -sk "${BASE_URL}/v1/health" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -q '200\|503'; do
         sleep 1; _wait=$((_wait + 1))
         [[ $_wait -lt 30 ]] || die "Container did not become ready after restart"
     done
@@ -188,14 +188,14 @@ run_phase() {
     SIGN_BODY="{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}"
 
     run_bench "$phase_label" "sign/dev-signing-key" \
-        "${BASE_URL}/sign/dev-signing-key" \
+        "${BASE_URL}/v1/sign/dev-signing-key" \
         "$concurrency" "$duration" \
         -d "$SIGN_BODY" || warn "sign/dev-signing-key phase had errors"
 
     # --- Decrypt OpenSSL ---
     if [[ -n "${OPENSSL_DECRYPT_BODY:-}" ]]; then
         run_bench "$phase_label" "decrypt/dev-decryption-key" \
-            "${BASE_URL}/decrypt/dev-decryption-key" \
+            "${BASE_URL}/v1/decrypt/dev-decryption-key" \
             "$concurrency" "$duration" \
             -d "$OPENSSL_DECRYPT_BODY" || warn "decrypt/dev-decryption-key phase had errors"
     else
@@ -228,7 +228,7 @@ hdr "Sanity checks"
 HASH=$(printf '%s' 'perf-test-payload' | openssl dgst -sha256 -binary | base64)
 SIGN_BODY="{\"algorithm\":\"rsa-pkcs1-v1_5-sha256\",\"hash\":\"$HASH\"}"
 
-for ep in sign/dev-signing-key; do
+for ep in v1/sign/dev-signing-key; do
     status=$(curl -sk -X POST -H "Authorization: Bearer $BEARER_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$SIGN_BODY" -o /dev/null -w "%{http_code}" "${BASE_URL}/$ep")

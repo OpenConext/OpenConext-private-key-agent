@@ -33,7 +33,7 @@ When a SimpleSAMLphp IdP signs a SAML Response or Assertion, the following happe
 The `PrivateKeyAgent` adapter implementing `SignatureBackend` must:
 
 1. Compute `hash($digestAlgorithm, $plaintext)` locally — the agent API accepts a pre-computed hash, not raw plaintext.
-2. Call `POST /sign/{key_name}` with the Base64-encoded hash and the algorithm identifier.
+2. Call `POST /v1/sign/{key_name}` with the Base64-encoded hash and the algorithm identifier.
 3. Return the binary signature bytes to xml-security, which embeds them in `ds:SignatureValue`.
 
 The private key never leaves the agent. Only the hash value crosses the network boundary.
@@ -44,7 +44,7 @@ When a SimpleSAMLphp SP decrypts an encrypted SAML Assertion, the XML contains a
 
 The `PrivateKeyAgent` adapter implementing `EncryptionBackend` must:
 
-1. Call `POST /decrypt/{key_name}` with the Base64-encoded ciphertext and the algorithm (`rsa-pkcs1-v1_5` or one of the OAEP variants).
+1. Call `POST /v1/decrypt/{key_name}` with the Base64-encoded ciphertext and the algorithm (`rsa-pkcs1-v1_5` or one of the OAEP variants).
 2. Return the decrypted session key bytes to xml-security, which uses them to decrypt the assertion content with AES.
 
 The symmetric session key and the assertion content are never sent to the agent.
@@ -67,7 +67,7 @@ sequenceDiagram
     Note over XMLSec: C14N-transform XML element<br/>Compute reference digest (SHA-256)<br/>Build ds:SignedInfo
     XMLSec->>Adapter: sign(privateKey, c14n ds:SignedInfo bytes)
     Note over Adapter: hash(SHA-256, plaintext)
-    Adapter->>Agent: POST /sign/{key_name}<br/>{ algorithm: "rsa-pkcs1-v1_5-sha256",<br/>  hash: "base64…" }
+    Adapter->>Agent: POST /v1/sign/{key_name}<br/>{ algorithm: "rsa-pkcs1-v1_5-sha256",<br/>  hash: "base64…" }
     Agent->>Backend: Construct DigestInfo + RSA private encrypt
     Backend-->>Agent: Raw signature bytes
     Agent-->>Adapter: { "signature": "base64…" }
@@ -90,7 +90,7 @@ sequenceDiagram
     SP->>XMLSec: decrypt(encryptedAssertion, decryptor)
     Note over XMLSec: Extract RSA-encrypted session key<br/>from xenc:CipherValue
     XMLSec->>Adapter: decrypt(privateKey, encryptedSessionKey)
-    Adapter->>Agent: POST /decrypt/{key_name}<br/>{ algorithm: "rsa-pkcs1-oaep-mgf1-sha256",<br/>  ciphertext: "base64…" }
+    Adapter->>Agent: POST /v1/decrypt/{key_name}<br/>{ algorithm: "rsa-pkcs1-oaep-mgf1-sha256",<br/>  ciphertext: "base64…" }
     Agent->>Backend: RSA private decrypt (OAEP or PKCS#1 v1.5)
     Backend-->>Agent: Session key bytes
     Agent-->>Adapter: { "decrypted_data": "base64…" }
@@ -145,7 +145,7 @@ For RSA PKCS#1 OAEP decryption, the MGF1 hash algorithm is specified via the alg
 | Language | PHP 8.5 |
 | Framework | Symfony 7.4 |
 | HTTP layer | Plain Symfony controllers |
-| API documentation | NelmioApiDocBundle (OpenAPI) |
+| API documentation | Markdown (`docs/api.md`) |
 | Logging | Monolog with JSON formatter to stdout |
 | Testing | PHPUnit with mock interfaces |
 | Deployment | Docker (Apache 2.4, `ghcr.io/openconext/openconext-basecontainers/php85-apache2`) |
@@ -160,7 +160,7 @@ For RSA PKCS#1 OAEP decryption, the MGF1 hash algorithm is specified via the alg
 
 ### Authentication
 
-All endpoints except `/health` and `/health/key/{key_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `token` values in the configuration using `hash_equals()` to prevent timing attacks.
+All endpoints except `/v1/health` and `/v1/health/key/{key_name}` require a Bearer token in the `Authorization` header (RFC 6750). Tokens are matched against `token` values in the configuration using `hash_equals()` to prevent timing attacks.
 
 > **This is a static pre-shared bearer token scheme, not OAuth 2.0 client credentials.**
 >
@@ -170,7 +170,7 @@ All endpoints except `/health` and `/health/key/{key_name}` require a Bearer tok
 
 ### Brute-force rate limiting
 
-The agent enforces a **failure-only sliding-window rate limit** on the `POST /sign` and `POST /decrypt` endpoints to protect against bearer-token brute-force attacks.
+The agent enforces a **failure-only sliding-window rate limit** on the `POST /v1/sign` and `POST /v1/decrypt` endpoints to protect against bearer-token brute-force attacks.
 
 #### Policy
 
@@ -210,7 +210,7 @@ Retry-After: 47
 }
 ```
 
-### `POST /sign/{key_name}`
+### `POST /v1/sign/{key_name}`
 
 Signs a hash value using the specified key. The `key_name` path parameter must match `[a-zA-Z0-9_-]{1,64}`.
 
@@ -238,7 +238,7 @@ Response `200`:
 }
 ```
 
-### `POST /decrypt/{key_name}`
+### `POST /v1/decrypt/{key_name}`
 
 Decrypts ciphertext using the specified key. The `key_name` path parameter must match `[a-zA-Z0-9_-]{1,64}`.
 
@@ -266,7 +266,7 @@ Response `200`:
 }
 ```
 
-### `GET /health`
+### `GET /v1/health`
 
 No authentication required. Returns `200` if all backends are healthy, `503` otherwise.
 
@@ -287,7 +287,7 @@ Response `503`:
 }
 ```
 
-### `GET /health/key/{key_name}`
+### `GET /v1/health/key/{key_name}`
 
 No authentication required. The `key_name` path parameter must match a configured key name.
 
@@ -414,7 +414,7 @@ Each entry in `keys` defines a logical key identity backed by a single PEM file.
 | Directory | Purpose |
 |---|---|
 | `bin/` | Symfony console entry point (`bin/console`) |
-| `config/` | Symfony configuration: routing, service wiring, and package configs (monolog, nelmio, security) |
+| `config/` | Symfony configuration: routing, service wiring, and package configs (monolog, security) |
 | `docker/` | Docker build artefacts: multi-stage `Dockerfile` and PHP ini files |
 | `public/` | Web root: `index.php` (Apache entry point) |
 | `src/Backend/` | OpenSSL backend implementation and backend interfaces |
@@ -771,7 +771,6 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
 {
   "require": {
     "php": "^8.5",
-    "nelmio/api-doc-bundle": "^4.0",
     "symfony/console": "^7.4",
     "symfony/framework-bundle": "^7.4",
     "symfony/monolog-bundle": "^3.10",

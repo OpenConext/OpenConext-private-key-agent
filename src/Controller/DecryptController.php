@@ -34,7 +34,7 @@ final class DecryptController
     ) {
     }
 
-    #[Route('/decrypt/{keyName}', name: 'decrypt', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
+    #[Route('/v1/decrypt/{keyName}', name: 'decrypt', methods: ['POST'], requirements: ['keyName' => KeyName::PATTERN])]
     public function decrypt(Request $request, string $keyName): JsonResponse
     {
         $client = $this->authenticator->authenticate($request);
