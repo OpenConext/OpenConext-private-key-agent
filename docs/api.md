@@ -239,18 +239,6 @@ See [Error responses](#error-responses).
 
 See [Error responses](#error-responses).
 
-##### 429 Too Many Requests
-
-The client IP has exceeded the failure-only rate limit (5 failed authentication attempts per 60-second
-sliding window). The response includes a `Retry-After` header indicating the number of seconds until
-the window resets:
-
-```
-Retry-After: 42
-```
-
-See [Error responses](#error-responses).
-
 ##### 500 Internal Server Error
 
 An unexpected error occurred during the signing operation.
@@ -344,17 +332,6 @@ See [Error responses](#error-responses).
 
 See [Error responses](#error-responses).
 
-##### 429 Too Many Requests
-
-The client IP has exceeded the failure-only rate limit (5 failed authentication attempts per 60-second
-sliding window). The response includes a `Retry-After` header:
-
-```
-Retry-After: 42
-```
-
-See [Error responses](#error-responses).
-
 ##### 500 Internal Server Error
 
 An unexpected error occurred during the decryption operation.
@@ -389,7 +366,6 @@ All error responses use the same JSON structure:
 | 403         | `access_denied`  | The client is authenticated but not authorised to use the requested key    |
 | 404         | `not_found`      | The requested key name is not registered in the agent                      |
 | 405         | `method_not_allowed`| The HTTP method is not allowed on this endpoint                            |
-| 429         | `too_many_requests`  | Rate limit exceeded; too many failed authentication attempts from this IP  |
 | 500         | `server_error`   | Unexpected internal error                                                  |
 | 503         | `server_error`   | Key health check failed                                                    |
 
@@ -402,9 +378,9 @@ body with extra fields; see the individual endpoint sections above.
 
 Complete matrix of HTTP status codes returned by each endpoint:
 
-| Endpoint                          | 200 | 400 | 401 | 403 | 404 | 405 | 429 | 500 | 503 |
-|-----------------------------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `GET /v1/health`                  |  ✓  |     |     |     |     |  ✓  |     |     |  ✓  |
-| `GET /v1/health/key/{keyName}`    |  ✓  |     |     |     |  ✓  |  ✓  |     |     |  ✓  |
-| `POST /v1/sign/{keyName}`         |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |     |
-| `POST /v1/decrypt/{keyName}`      |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |     |
+| Endpoint                          | 200 | 400 | 401 | 403 | 404 | 405 | 500 | 503 |
+|-----------------------------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `GET /v1/health`                  |  ✓  |     |     |     |     |  ✓  |     |  ✓  |
+| `GET /v1/health/key/{keyName}`    |  ✓  |     |     |     |  ✓  |  ✓  |     |  ✓  |
+| `POST /v1/sign/{keyName}`         |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |     |
+| `POST /v1/decrypt/{keyName}`      |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |  ✓  |     |

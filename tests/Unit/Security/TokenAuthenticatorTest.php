@@ -4,17 +4,12 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\Tests\Unit\Security;
 
-use DateTimeImmutable;
 use OpenConext\PrivateKeyAgent\Config\AgentConfig;
 use OpenConext\PrivateKeyAgent\Config\ClientConfig;
 use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
-use OpenConext\PrivateKeyAgent\Exception\RateLimitException;
 use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\RateLimiter\LimiterInterface;
-use Symfony\Component\RateLimiter\RateLimit;
-use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 
 class TokenAuthenticatorTest extends TestCase
 {
@@ -28,39 +23,6 @@ class TokenAuthenticatorTest extends TestCase
         return $request;
     }
 
-    /** Returns a RateLimiterFactoryInterface mock that always accepts (token not exhausted). */
-    private function makeAcceptingLimiter(): RateLimiterFactoryInterface
-    {
-        $rateLimit = $this->createMock(RateLimit::class);
-        $rateLimit->method('isAccepted')->willReturn(true);
-
-        $limiter = $this->createMock(LimiterInterface::class);
-        $limiter->method('consume')->willReturn($rateLimit);
-
-        $factory = $this->createMock(RateLimiterFactoryInterface::class);
-        $factory->method('create')->willReturn($limiter);
-
-        return $factory;
-    }
-
-    /** Returns a RateLimiterFactoryInterface mock that rejects (limit exhausted). */
-    private function makeExhaustedLimiter(): RateLimiterFactoryInterface
-    {
-        $retryAfter = new DateTimeImmutable('+60 seconds');
-
-        $rateLimit = $this->createMock(RateLimit::class);
-        $rateLimit->method('isAccepted')->willReturn(false);
-        $rateLimit->method('getRetryAfter')->willReturn($retryAfter);
-
-        $limiter = $this->createMock(LimiterInterface::class);
-        $limiter->method('consume')->willReturn($rateLimit);
-
-        $factory = $this->createMock(RateLimiterFactoryInterface::class);
-        $factory->method('create')->willReturn($limiter);
-
-        return $factory;
-    }
-
     public function testAuthenticateWithValidToken(): void
     {
         $config = new AgentConfig(
@@ -71,7 +33,7 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
         $client        = $authenticator->authenticate($this->makeRequest('valid-token-here-must-be-long'));
 
         $this->assertSame('my-client', $client->name);
@@ -88,7 +50,7 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
 
         $this->expectException(AuthenticationException::class);
         $authenticator->authenticate($this->makeRequest('wrong-token'));
@@ -104,7 +66,7 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
         $request       = Request::create('/', server: ['REMOTE_ADDR' => '127.0.0.1']);
 
         $this->expectException(AuthenticationException::class);
@@ -121,7 +83,7 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
         $request       = Request::create('/', server: ['REMOTE_ADDR' => '127.0.0.1']);
         $request->headers->set('Authorization', 'Basic dXNlcjpwYXNz');
 
@@ -141,7 +103,7 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
 
         $clientB = $authenticator->authenticate($this->makeRequest('token-bbb'));
         $this->assertSame('client-b', $clientB->name);
@@ -150,9 +112,10 @@ class TokenAuthenticatorTest extends TestCase
         $this->assertSame('client-a', $clientA->name);
     }
 
-    public function testRateLimitNotYetExhaustedThrowsAuthenticationException(): void
+    public function testRepeatedAuthFailuresAlwaysThrowAuthenticationException(): void
     {
-        // Under the limit: still throws AuthenticationException (401), not RateLimitException (429)
+        // Regression test: removing rate limiting must not cause repeated failures to produce
+        // anything other than AuthenticationException (no 429 / no Retry-After logic).
         $config = new AgentConfig(
             agentName: 'test-agent',
             keys: [],
@@ -161,65 +124,19 @@ class TokenAuthenticatorTest extends TestCase
             ],
         );
 
-        $authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $authenticator = new TokenAuthenticator($config);
 
-        $this->expectException(AuthenticationException::class);
-        $authenticator->authenticate($this->makeRequest('wrong-token'));
-    }
+        for ($i = 0; $i < 10; $i++) {
+            try {
+                $authenticator->authenticate($this->makeRequest('wrong-token-' . $i));
+                $this->fail('Expected AuthenticationException on attempt ' . $i);
+            } catch (AuthenticationException) {
+                // Expected: every failure must be AuthenticationException, never anything else
+            }
+        }
 
-    public function testRateLimitExhaustedThrowsRateLimitException(): void
-    {
-        // Limit exhausted: throws RateLimitException (429) instead of AuthenticationException
-        $config = new AgentConfig(
-            agentName: 'test-agent',
-            keys: [],
-            clients: [
-                new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
-            ],
-        );
-
-        $authenticator = new TokenAuthenticator($config, $this->makeExhaustedLimiter());
-
-        $this->expectException(RateLimitException::class);
-        $authenticator->authenticate($this->makeRequest('wrong-token'));
-    }
-
-    public function testRateLimitExhaustedOnMissingTokenThrowsRateLimitException(): void
-    {
-        // Missing token also triggers rate limiter
-        $config = new AgentConfig(
-            agentName: 'test-agent',
-            keys: [],
-            clients: [
-                new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
-            ],
-        );
-
-        $authenticator = new TokenAuthenticator($config, $this->makeExhaustedLimiter());
-        $request       = Request::create('/', server: ['REMOTE_ADDR' => '127.0.0.1']);
-
-        $this->expectException(RateLimitException::class);
-        $authenticator->authenticate($request);
-    }
-
-    public function testValidTokenDoesNotConsumeLimiterToken(): void
-    {
-        // Success path: the limiter's consume() must NOT be called
-        $config = new AgentConfig(
-            agentName: 'test-agent',
-            keys: [],
-            clients: [
-                new ClientConfig(name: 'my-client', token: 'valid-token', allowedKeys: ['key1']),
-            ],
-        );
-
-        $limiter = $this->createMock(LimiterInterface::class);
-        $limiter->expects($this->never())->method('consume');
-
-        $factory = $this->createMock(RateLimiterFactoryInterface::class);
-        $factory->method('create')->willReturn($limiter);
-
-        $authenticator = new TokenAuthenticator($config, $factory);
-        $authenticator->authenticate($this->makeRequest('valid-token'));
+        // After 10 failures the valid token must still work (no lockout state)
+        $client = $authenticator->authenticate($this->makeRequest('valid-token'));
+        $this->assertSame('my-client', $client->name);
     }
 }

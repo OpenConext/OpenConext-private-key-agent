@@ -31,7 +31,6 @@ services:
     OpenConext\PrivateKeyAgent\Security\TokenAuthenticator:
         arguments:
             $config: '@OpenConext\PrivateKeyAgent\Config\AgentConfig'
-            $authFailureLimiter: '@limiter.auth_failure'
 
     OpenConext\PrivateKeyAgent\EventSubscriber\ExceptionSubscriber:
         arguments:

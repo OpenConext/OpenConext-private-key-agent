@@ -168,47 +168,27 @@ All endpoints except `/v1/health` and `/v1/health/key/{key_name}` require a Bear
 >
 > The field `allowed_keys` is a list of logical **key names** (matching key `name` values) that the client is authorised to use. It is not a set of cryptographic keys or client certificates.
 
-### Brute-force rate limiting
+### Rate limiting
 
-The agent enforces a **failure-only sliding-window rate limit** on the `POST /v1/sign` and `POST /v1/decrypt` endpoints to protect against bearer-token brute-force attacks.
+Rate limiting is **deliberately out of scope** for this application.
 
-#### Policy
+#### Rationale
 
-| Parameter | Value |
-|---|---|
-| Window | 60 seconds (sliding) |
-| Maximum failures per IP | 5 |
-| Response when limit exceeded | `429 Too Many Requests` |
-| `Retry-After` header | Seconds until the window resets (minimum 1) |
+Bearer tokens must be provisioned with at least 256 bits of randomness (e.g. 32 random bytes
+encoded as base64url, or 64 hex characters). The application validates only minimum length, not
+entropy — it is the operator's responsibility to provision tokens with adequate randomness.
+This makes brute-force attacks computationally infeasible regardless of request rate.
 
-#### Behaviour
+Rate limiting and brute-force protection are infrastructure responsibilities best handled by:
 
-- **Success path is unaffected.** When a request carries a valid bearer token the rate limiter is never consulted. There is zero overhead for legitimate high-frequency callers.
-- **All authentication failures are counted.** Both a missing `Authorization` header and a wrong token consume one token from the sliding window for the caller's IP.
-- **IP key.** The caller's IP is taken from `REMOTE_ADDR` — the direct TCP peer. `X-Forwarded-For` is intentionally ignored to prevent a client from aggregating or spoofing an IP.
-- **Window behaviour.** The sliding window drains naturally. A rejected request does **not** consume an additional token, so the window starts recovering immediately after the last failed attempt.
+- A **WAF** (Web Application Firewall)
+- A **reverse proxy** with connection and rate limiting (e.g. nginx `limit_req`)
+- **Kubernetes Ingress** annotations (e.g. `nginx.ingress.kubernetes.io/limit-rps`)
+- A **cloud load balancer** with per-IP rate limiting
 
-#### Implementation
-
-Rate limiting is implemented with Symfony's `RateLimiter` component backed by the filesystem cache adapter (`cache.adapter.filesystem`). The rate limiter state is written to `var/cache/{env}/pools/` on the local disk, which is shared across all Apache worker processes within the same container — the per-IP failure count is enforced across the entire server.
-
-In the `test` environment, the filesystem pool is replaced with an in-memory array adapter so that PHPUnit tests run in isolation without touching disk state.
-
-> **Load-balanced deployments.** The filesystem adapter stores state on the local disk of each container replica. When the agent is deployed with multiple replicas behind a load balancer, each replica maintains its own independent failure counter. A client can distribute up to *N × 5* attempts across *N* replicas before any single replica blocks them. For load-balanced multi-replica deployments, replace the `cache.rate_limiter` pool adapter in `config/packages/cache.yaml` with a network-shared backend such as Redis (`cache.adapter.redis`) or Memcached (`cache.adapter.memcached`). No other code changes are required.
-
-#### 429 response example
-
-```
-HTTP/1.1 429 Too Many Requests
-Content-Type: application/json
-Retry-After: 47
-
-{
-  "status": 429,
-  "error": "too_many_requests",
-  "message": "Too many failed authentication attempts"
-}
-```
+> **Deployer note:** If this agent is exposed to untrusted networks, configure rate limiting in the
+> infrastructure layer before requests reach the application. The application itself will always
+> return `401 Unauthorized` for invalid tokens, never `429 Too Many Requests`.
 
 ### `POST /v1/sign/{key_name}`
 
@@ -347,7 +327,6 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 | 401 | `invalid_token` | Missing or invalid bearer token |
 | 403 | `access_denied` | Client not permitted to use the key |
 | 404 | `not_found` | Key not registered or operation not permitted for key |
-| 429 | `too_many_requests` | Too many failed authentication attempts from this IP |
 | 500 | `server_error` | Backend failure (OpenSSL error) |
 
 ---
@@ -554,8 +533,8 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 - Extracts the Bearer token from the `Authorization` header.
 - Iterates configured clients and compares tokens using `hash_equals()`.
 - Returns the matched `ClientConfig` as the authenticated entity.
-- On any authentication failure (missing token or wrong token), calls a private `recordFailure()` helper that consumes one token from the rate-limiter window for the caller IP. If the window is exhausted, throws `RateLimitException` (→ 429 + `Retry-After`). Otherwise throws `AuthenticationException` (→ 401 + `WWW-Authenticate`).
-- The success path never interacts with the rate limiter.
+- On any authentication failure (missing token or wrong token), throws `AuthenticationException` (→ 401 + `WWW-Authenticate`).
+- There is no rate limiting; see [Rate limiting](#rate-limiting).
 
 ### `AccessControlService`
 
@@ -571,7 +550,6 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
   - `AuthenticationException` → 401 + `WWW-Authenticate` header
   - `AccessDeniedException` → 403
   - `KeyNotFoundException` → 404
-  - `RateLimitException` → 429 + `Retry-After: <seconds>` header
   - `BackendException` → 500
   - Unhandled exceptions → 500
 
@@ -759,7 +737,7 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
 | Level | Events |
 |---|---|
 | INFO | Each sign/decrypt request: client name, key name, algorithm |
-| WARNING | Access denied, invalid token attempts, rate limit exceeded (IP logged) |
+| WARNING | Access denied, invalid token attempts |
 | ERROR | Backend failures, config load failures |
 | **Never logged** | Bearer tokens, key material, hash values, plaintext data, decrypted values |
 
@@ -775,7 +753,6 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
     "symfony/framework-bundle": "^7.4",
     "symfony/monolog-bundle": "^3.10",
     "symfony/property-access": "^7.4",
-    "symfony/rate-limiter": "^7.4",
     "symfony/runtime": "^7.4",
     "symfony/security-bundle": "^7.4",
     "symfony/serializer": "^7.4",
@@ -876,7 +853,7 @@ The following estimates are derived from published OpenSSL benchmarks (`openssl 
 | JSON deserialization + validation | ~0.2 ms | Small payload (~100 bytes), two constraint checks |
 | RSA private key operation | ~0.7 ms | `openssl_private_encrypt()` / `openssl_private_decrypt()`; includes DigestInfo construction for signing |
 | JSON serialization + response | ~0.1 ms | Single Base64 field |
-| **Total per request** | **~2.2 ms** | Rate limiter adds zero overhead on the success path (not consulted) |
+| **Total per request** | **~2.2 ms** | No application-level rate limiting; latency is dominated by the RSA operation |
 
 Approximate per-worker throughput: ~450 ops/sec.
 

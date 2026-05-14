@@ -43,10 +43,13 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 
 - **OpenSSL backend:** software PEM keys protected by the agent process.
 - **Static bearer-token authentication** (RFC 6750): each client has a pre-shared token; tokens are compared with `hash_equals()` to prevent timing attacks.
-- **Brute-force rate limiting:** sliding-window limiter (5 failures / 60 s per IP); only failed authentication attempts are counted — the success path has zero overhead.
 - **Per-client key authorisation:** each client declares the key names it may use.
 - **Fail-fast configuration:** invalid or missing config prevents the application container from starting.
 - **Health endpoints:** `/v1/health` and `/v1/health/key/{key_name}` for liveness probes and monitoring.
+
+> **Rate limiting** is deliberately out of scope for this application. Protection against bearer-token
+> brute-force attacks is an infrastructure responsibility (WAF, reverse proxy, Kubernetes Ingress).
+> See the [Design Specification](docs/DESIGN-SPECIFICATION.md) for the rationale.
 
 ### Technology stack
 
@@ -439,23 +442,7 @@ For the complete API documentation — endpoints, request/response schemas, erro
 
 > **Compatibility policy:** The agent ignores unknown JSON fields in request bodies, so clients can add fields without breaking the server. All `/v1/` URLs are stable — breaking changes will be introduced under a new `/v2/` prefix.
 
-Error responses follow RFC 6750 and always include `status`, `error`, and `message` fields. On `401` a `WWW-Authenticate` header is also returned. On `429` a `Retry-After` header is returned indicating the number of seconds until the rate-limit window resets.
-
-### Rate limiting
-
-The `POST /v1/sign` and `POST /v1/decrypt` endpoints apply a **failure-only sliding-window rate limit** per caller IP to protect against bearer-token brute-force attacks.
-
-| Parameter | Value |
-|---|---|
-| Window | 60 seconds (sliding) |
-| Maximum failures per IP | 5 |
-| Response when exceeded | `429 Too Many Requests` + `Retry-After` header |
-
-**Only failed authentication attempts are counted.** Requests with a valid bearer token never touch the rate limiter, so there is no performance impact on normal high-frequency usage. The IP key is taken from `REMOTE_ADDR` (not `X-Forwarded-For`) to prevent clients from spoofing a shared proxy IP.
-
-Rate limit state is stored on disk using the filesystem cache adapter, shared across all Apache worker processes within the same container. In the test environment the in-memory array adapter is used instead.
-
-> **Load-balanced deployments.** With multiple replicas behind a load balancer, each replica maintains its own failure counter on local disk. For cross-replica enforcement, replace the `cache.rate_limiter` pool adapter in `config/packages/cache.yaml` with a network-shared backend (Redis or Memcached).
+Error responses follow RFC 6750 and always include `status`, `error`, and `message` fields. On `401` a `WWW-Authenticate` header is also returned.
 
 ---
 

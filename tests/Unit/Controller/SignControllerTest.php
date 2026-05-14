@@ -19,9 +19,6 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\RateLimiter\LimiterInterface;
-use Symfony\Component\RateLimiter\RateLimit;
-use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 use Symfony\Component\Validator\Validation;
 
 use function base64_encode;
@@ -48,7 +45,7 @@ class SignControllerTest extends TestCase
             ],
         );
 
-        $this->authenticator = new TokenAuthenticator($config, $this->makeAcceptingLimiter());
+        $this->authenticator = new TokenAuthenticator($config);
         $this->registry      = $this->createMock(KeyRegistryInterface::class);
 
         $this->controller = new SignController(
@@ -58,20 +55,6 @@ class SignControllerTest extends TestCase
             validator: Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator(),
             logger: new NullLogger(),
         );
-    }
-
-    private function makeAcceptingLimiter(): RateLimiterFactoryInterface
-    {
-        $rateLimit = $this->createMock(RateLimit::class);
-        $rateLimit->method('isAccepted')->willReturn(true);
-
-        $limiter = $this->createMock(LimiterInterface::class);
-        $limiter->method('consume')->willReturn($rateLimit);
-
-        $factory = $this->createMock(RateLimiterFactoryInterface::class);
-        $factory->method('create')->willReturn($limiter);
-
-        return $factory;
     }
 
     public function testSignReturnsBase64Signature(): void
