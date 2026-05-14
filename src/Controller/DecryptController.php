@@ -6,6 +6,7 @@ namespace OpenConext\PrivateKeyAgent\Controller;
 
 use OpenConext\PrivateKeyAgent\Config\KeyName;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\OpenSSLException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlInterface;
 use OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
@@ -17,12 +18,12 @@ use Symfony\Component\Routing\Attribute\Route;
 
 use function base64_encode;
 use function hrtime;
-use function is_array;
-use function json_decode;
 use function round;
 
 final class DecryptController
 {
+    use JsonBodyParser;
+
     public function __construct(
         private readonly AuthenticatorInterface $authenticator,
         private readonly AccessControlInterface $accessControl,
@@ -38,17 +39,24 @@ final class DecryptController
 
         $this->accessControl->checkAccess($client, $keyName);
 
-        $data = json_decode($request->getContent(), true);
-        if (! is_array($data)) {
-            throw new InvalidRequestException('Invalid JSON body');
+        $input = DecryptionInput::fromArray($this->parseJsonBody($request));
+
+        $backend = $this->keyRegistry->getDecryptionBackend($keyName);
+        $start   = hrtime(true);
+
+        try {
+            $plaintextBytes = $backend->decrypt($input->ciphertextBytes, $input->algorithm);
+        } catch (OpenSSLException) {
+            $this->logger->warning('Decryption failed (invalid ciphertext)', [
+                'client'    => $client->name,
+                'key'       => $keyName,
+                'algorithm' => $input->algorithm,
+            ]);
+
+            throw new InvalidRequestException('Decryption failed');
         }
 
-        $input = DecryptionInput::fromArray($data);
-
-        $backend        = $this->keyRegistry->getDecryptionBackend($keyName);
-        $start          = hrtime(true);
-        $plaintextBytes = $backend->decrypt($input->ciphertextBytes, $input->algorithm);
-        $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
+        $durationMs = (int) round((hrtime(true) - $start) / 1_000_000);
 
         $this->logger->debug('decrypt completed', [
             'key'        => $keyName,

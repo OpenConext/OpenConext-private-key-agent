@@ -8,10 +8,8 @@ use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 
 use function array_key_exists;
-use function base64_decode;
 use function in_array;
 use function is_string;
-use function preg_match;
 use function sprintf;
 use function strlen;
 
@@ -19,8 +17,6 @@ final readonly class DecryptionInput
 {
     private const int MIN_CIPHERTEXT_BYTES = 128;
     private const int MAX_CIPHERTEXT_BYTES = 1024;
-
-    private const string BASE64_PATTERN = '/^[A-Za-z0-9+\/]*={0,2}\z/';
 
     public string $ciphertextBytes;
 
@@ -30,7 +26,7 @@ final readonly class DecryptionInput
             throw new InvalidRequestException('Invalid decryption algorithm.');
         }
 
-        $decoded = self::decodeBase64($encryptedDataBase64, 'encrypted_data');
+        $decoded = Base64Decoder::decode($encryptedDataBase64, 'encrypted_data');
 
         $len = strlen($decoded);
         if ($len < self::MIN_CIPHERTEXT_BYTES || $len > self::MAX_CIPHERTEXT_BYTES) {
@@ -65,23 +61,5 @@ final readonly class DecryptionInput
         }
 
         return new self($data['algorithm'], $data['encrypted_data']);
-    }
-
-    private static function decodeBase64(string $value, string $fieldName): string
-    {
-        if ($value === '') {
-            throw new InvalidRequestException(sprintf('The %s field must not be empty.', $fieldName));
-        }
-
-        if (preg_match(self::BASE64_PATTERN, $value) !== 1) {
-            throw new InvalidRequestException(sprintf('Invalid base64-encoded %s.', $fieldName));
-        }
-
-        $decoded = base64_decode($value, true);
-        if ($decoded === false) {
-            throw new InvalidRequestException(sprintf('Invalid base64-encoded %s.', $fieldName));
-        }
-
-        return $decoded;
     }
 }

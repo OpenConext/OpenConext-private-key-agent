@@ -305,7 +305,8 @@ Decrypts RSA-encrypted data (typically a symmetric session key) using the named 
 ##### 400 Bad Request
 
 Returned when the request body is invalid: missing or invalid JSON, unknown algorithm, ciphertext
-outside the 128–1024 byte range, or invalid base64 encoding.
+outside the 128–1024 byte range, invalid base64 encoding, or when the decryption operation fails
+(e.g., ciphertext encrypted with a different key or corrupted ciphertext).
 See [Error responses](#error-responses).
 
 ##### 401 Unauthorized
@@ -334,7 +335,8 @@ See [Error responses](#error-responses).
 
 ##### 500 Internal Server Error
 
-An unexpected error occurred during the decryption operation.
+An unexpected internal error occurred. Note: decryption failures due to invalid ciphertext return
+400, not 500.
 See [Error responses](#error-responses).
 
 ---
@@ -361,7 +363,7 @@ All error responses use the same JSON structure:
 
 | HTTP status | `error` value    | Meaning                                                                    |
 |-------------|------------------|----------------------------------------------------------------------------|
-| 400         | `invalid_request`| Request body is missing, malformed, or contains invalid field values       |
+| 400         | `invalid_request`| Request body is missing, malformed, contains invalid field values, or decryption failed |
 | 401         | `invalid_token`  | No `Authorization` header, or the Bearer token is invalid or expired       |
 | 403         | `access_denied`  | The client is authenticated but not authorised to use the requested key    |
 | 404         | `not_found`      | The requested key name is not registered in the agent                      |

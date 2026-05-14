@@ -190,6 +190,13 @@ Rate limiting and brute-force protection are infrastructure responsibilities bes
 > infrastructure layer before requests reach the application. The application itself will always
 > return `401 Unauthorized` for invalid tokens, never `429 Too Many Requests`.
 
+### Request body size limits
+
+The application does not enforce request body size limits in application code. It is assumed that
+the upstream infrastructure (reverse proxy, WAF, or load balancer) enforces appropriate limits.
+The bundled Apache configuration sets `LimitRequestBody 65536` (64 KB) as a sensible default for
+signing and decryption payloads.
+
 ### `POST /v1/sign/{key_name}`
 
 Signs a hash value using the specified key. The `key_name` path parameter must match `[a-zA-Z0-9_-]{1,64}`.
@@ -324,11 +331,11 @@ WWW-Authenticate: Bearer realm="<agent_name>", error="invalid_token", error_desc
 
 | HTTP Status | Error Code | Cause |
 |---|---|---|
-| 400 | `invalid_request` | Missing or invalid request parameter |
+| 400 | `invalid_request` | Missing or invalid request parameter, or decryption failed (invalid ciphertext) |
 | 401 | `invalid_token` | Missing or invalid bearer token |
 | 403 | `access_denied` | Client not permitted to use the key |
 | 404 | `not_found` | Key not registered or operation not permitted for key |
-| 500 | `server_error` | Backend failure (OpenSSL error) |
+| 500 | `server_error` | Backend failure (unexpected internal error) |
 
 ---
 
@@ -522,7 +529,7 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
 - `token`: required; **must be non-empty** (an empty token would authenticate blank-token requests — security issue).
 - `allowed_keys`: required; non-empty list.
 
-> `ValidateConfigCommand` reuses `ConfigLoader` for all of the above. Successful parsing means the config is structurally valid; it does not open key files or validate key accessibility.
+> `ValidateConfigCommand` reuses `ConfigLoader` for all of the above. Successful parsing means the config is structurally valid. The optional `--check-keys` flag extends validation to verify that each key file exists, is readable, and contains a valid RSA private key.
 
 > **RSA-only enforcement:** Only RSA private keys are currently supported. The OpenSSL backend validates this at construction time (checking for an RSA modulus in the key details). A non-RSA key causes immediate failure with a `BackendException`.
 
@@ -559,6 +566,11 @@ Performs the following explicit validations (throws `InvalidConfigurationExcepti
   - `KeyNotFoundException` → 404
   - `BackendException` → 500
   - Unhandled exceptions → 500
+
+> **Decryption failure handling:** When an OpenSSL decryption operation fails (e.g., invalid
+> ciphertext or wrong key), the `DecryptController` catches the `OpenSSLException` and re-throws
+> it as `InvalidRequestException` (→ 400) with a generic message. This prevents leaking OpenSSL
+> error details and avoids distinguishable 500 responses that could aid padding-oracle attacks.
 
 ### Backend Interfaces
 
@@ -647,12 +659,13 @@ Without this, a health-check failure during request N would leave error entries 
 
 ### `ValidateConfigCommand`
 
-`bin/console app:validate-config <config-path>`
+`bin/console app:validate-config <config-path> [--check-keys]`
 
 - Accepts a required `config-path` CLI argument.
 - Loads and validates the config file by calling `ConfigLoader::load($path)`.
 - Checks all required fields and semantic cross-references (see `ConfigLoader` section).
-- Does not check whether OpenSSL key files exist on disk, and does not open key files or validate key accessibility.
+- With `--check-keys`: additionally verifies for each configured key that the file exists, is readable, and contains a valid RSA private key (via OpenSSL).
+- Without `--check-keys`: does not open key files or validate key accessibility — structure and cross-references only.
 - Exits with code 0 on success, 1 on failure with human-readable error output.
 
 ---

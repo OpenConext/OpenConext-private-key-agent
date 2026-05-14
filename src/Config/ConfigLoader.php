@@ -37,6 +37,8 @@ final class ConfigLoader
         $keys    = self::parseKeys($data['keys'] ?? []);
         $clients = self::parseClients($data['clients'] ?? []);
 
+        self::validateAllowedKeys($clients, $keys);
+
         return new AgentConfig(
             agentName: $data['agent_name'],
             keys: $keys,
@@ -181,5 +183,33 @@ final class ConfigLoader
         }
 
         return $clients;
+    }
+
+    /**
+     * @param list<ClientConfig> $clients
+     * @param list<KeyConfig>    $keys
+     */
+    private static function validateAllowedKeys(array $clients, array $keys): void
+    {
+        $keyNames = [];
+        foreach ($keys as $key) {
+            $keyNames[$key->name] = true;
+        }
+
+        foreach ($clients as $client) {
+            foreach ($client->allowedKeys as $allowedKey) {
+                if ($allowedKey === '*') {
+                    continue;
+                }
+
+                if (! isset($keyNames[$allowedKey])) {
+                    throw new InvalidConfigurationException(sprintf(
+                        'Client "%s" references unknown key "%s" in allowed_keys',
+                        $client->name,
+                        $allowedKey,
+                    ));
+                }
+            }
+        }
     }
 }

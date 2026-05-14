@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Controller;
 
 use OpenConext\PrivateKeyAgent\Config\KeyName;
-use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlInterface;
 use OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
@@ -17,12 +16,12 @@ use Symfony\Component\Routing\Attribute\Route;
 
 use function base64_encode;
 use function hrtime;
-use function is_array;
-use function json_decode;
 use function round;
 
 final class SignController
 {
+    use JsonBodyParser;
+
     public function __construct(
         private readonly AuthenticatorInterface $authenticator,
         private readonly AccessControlInterface $accessControl,
@@ -38,12 +37,7 @@ final class SignController
 
         $this->accessControl->checkAccess($client, $keyName);
 
-        $data = json_decode($request->getContent(), true);
-        if (! is_array($data)) {
-            throw new InvalidRequestException('Invalid JSON body');
-        }
-
-        $input = SigningInput::fromArray($data);
+        $input = SigningInput::fromArray($this->parseJsonBody($request));
 
         $backend        = $this->keyRegistry->getSigningBackend($keyName);
         $start          = hrtime(true);

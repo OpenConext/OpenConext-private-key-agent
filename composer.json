@@ -56,6 +56,7 @@
             "@phpcs"
         ],
         "test": "phpunit",
+        "test:coverage": "phpunit --coverage-clover var/coverage/clover.xml --coverage-text",
         "check": [
             "@phplint",
             "@phpstan",

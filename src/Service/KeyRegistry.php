@@ -15,14 +15,14 @@ use function sprintf;
 
 final class KeyRegistry implements KeyRegistryInterface
 {
-    /** @var array<string, SigningBackendInterface&DecryptionBackendInterface> */
+    /** @var array<string, BackendInterface> */
     private array $backends = [];
 
     /** @var array<string, list<string>> */
     private array $operations = [];
 
     /** @param list<string> $operations */
-    public function register(string $keyName, SigningBackendInterface&DecryptionBackendInterface $backend, array $operations): void
+    public function register(string $keyName, BackendInterface $backend, array $operations): void
     {
         $this->backends[$keyName]   = $backend;
         $this->operations[$keyName] = $operations;
@@ -30,20 +30,30 @@ final class KeyRegistry implements KeyRegistryInterface
 
     public function getSigningBackend(string $keyName): SigningBackendInterface
     {
-        if (! isset($this->backends[$keyName]) || ! in_array('sign', $this->operations[$keyName], true)) {
+        $backend = $this->backends[$keyName] ?? null;
+        if ($backend === null || ! in_array('sign', $this->operations[$keyName], true)) {
             throw new KeyNotFoundException(sprintf('Key "%s" not found or does not permit signing', $keyName));
         }
 
-        return $this->backends[$keyName];
+        if (! $backend instanceof SigningBackendInterface) {
+            throw new KeyNotFoundException(sprintf('Key "%s" backend does not support signing', $keyName));
+        }
+
+        return $backend;
     }
 
     public function getDecryptionBackend(string $keyName): DecryptionBackendInterface
     {
-        if (! isset($this->backends[$keyName]) || ! in_array('decrypt', $this->operations[$keyName], true)) {
+        $backend = $this->backends[$keyName] ?? null;
+        if ($backend === null || ! in_array('decrypt', $this->operations[$keyName], true)) {
             throw new KeyNotFoundException(sprintf('Key "%s" not found or does not permit decryption', $keyName));
         }
 
-        return $this->backends[$keyName];
+        if (! $backend instanceof DecryptionBackendInterface) {
+            throw new KeyNotFoundException(sprintf('Key "%s" backend does not support decryption', $keyName));
+        }
+
+        return $backend;
     }
 
     /** @return list<BackendInterface> */

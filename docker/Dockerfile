@@ -35,11 +35,17 @@ COPY docker/apache-app.conf /etc/apache2/sites-enabled/000-default.conf
 
 COPY docker/entrypoint-app.sh /entrypoint-app.sh
 RUN chmod +x /entrypoint-app.sh
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost/v1/health || exit 1
+
 ENTRYPOINT ["/entrypoint-app.sh"]
 CMD ["/entrypoint.sh", "sh", "-c", "php bin/console cache:warmup --no-interaction && chown -R www-data:www-data /var/www/html/var && exec apache2-foreground"]
 
 # ---- Development stage (extends prod with all dev tooling) ----
 FROM prod AS dev
+
+RUN apt-get update && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*
 
 COPY --from=vendor-dev /var/www/html/vendor ./vendor
 COPY tests/ ./tests/

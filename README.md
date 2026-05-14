@@ -327,6 +327,12 @@ docker compose exec app bin/console app:validate-config /path/to/config.yaml
 
 Exit code `0` means the config is structurally valid. Errors are printed to stderr. This does **not** open key files — it validates the YAML structure and cross-references only.
 
+To additionally verify that key files exist, are readable, and contain valid RSA private keys:
+
+```bash
+docker compose exec app bin/console app:validate-config --check-keys /path/to/config.yaml
+```
+
 ### Dependency security audit
 
 ```bash
@@ -364,6 +370,9 @@ For the full configuration reference (all fields, validation rules, secrets hand
 
 ```bash
 docker compose exec app bin/console app:validate-config /path/to/config.yaml
+
+# Also verify key files are accessible and valid RSA keys:
+docker compose exec app bin/console app:validate-config --check-keys /path/to/config.yaml
 ```
 
 ---
