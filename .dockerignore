@@ -2,6 +2,7 @@
 .worktrees
 .phpunit.result.cache
 .phplint.cache
+config/keys
 docs
 vendor
 var/cache
