@@ -9,6 +9,8 @@ use OpenConext\PrivateKeyAgent\Exception\InvalidConfigurationException;
 use PHPUnit\Framework\TestCase;
 
 use function file_put_contents;
+use function sprintf;
+use function str_repeat;
 use function sys_get_temp_dir;
 use function tempnam;
 use function unlink;
@@ -371,6 +373,25 @@ clients:
     allowed_keys: [k1]
 YAML;
         $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
+        file_put_contents($tmpFile, $yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('[a-zA-Z0-9_-]{1,64}');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsOnKeyNameTooLong(): void
+    {
+        $longName = str_repeat('a', 65);
+        $yaml     = sprintf(
+            "agent_name: test-agent\nkeys:\n  - name: \"%s\"\n    key_path: /tmp/key.pem\n    operations: [sign]\nclients:\n  - name: c1\n    token: test-token-value-at-least-32-chars-long\n    allowed_keys: [k1]\n",
+            $longName,
+        );
+        $tmpFile  = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
         file_put_contents($tmpFile, $yaml);
 
         try {

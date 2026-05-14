@@ -4,49 +4,42 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\Tests\Unit\Service;
 
-use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
+use OpenConext\PrivateKeyAgent\Backend\DecryptionBackendInterface;
+use OpenConext\PrivateKeyAgent\Backend\SigningBackendInterface;
 use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistry;
 use PHPUnit\Framework\TestCase;
 
-use function file_exists;
-use function openssl_pkey_export_to_file;
-use function openssl_pkey_new;
-use function sys_get_temp_dir;
-use function tempnam;
-use function unlink;
-
-use const OPENSSL_KEYTYPE_RSA;
-
 class KeyRegistryTest extends TestCase
 {
-    private static string $keyPath;
-
-    public static function setUpBeforeClass(): void
+    private function createBackend(): SigningBackendInterface&DecryptionBackendInterface
     {
-        $keyPair = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-        self::assertNotFalse($keyPair, 'Failed to generate RSA key pair');
-        self::$keyPath = tempnam(sys_get_temp_dir(), 'rsa_') . '.pem';
-        openssl_pkey_export_to_file($keyPair, self::$keyPath);
-    }
+        return new class implements SigningBackendInterface, DecryptionBackendInterface {
+            public function getName(): string
+            {
+                return 'test-key';
+            }
 
-    public static function tearDownAfterClass(): void
-    {
-        if (! file_exists(self::$keyPath)) {
-            return;
-        }
+            public function isHealthy(): bool
+            {
+                return true;
+            }
 
-        unlink(self::$keyPath);
-    }
+            public function sign(string $hash, string $algorithm): string
+            {
+                return '';
+            }
 
-    private function createBackend(string $name): OpenSslBackend
-    {
-        return new OpenSslBackend($name, self::$keyPath);
+            public function decrypt(string $ciphertext, string $algorithm): string
+            {
+                return '';
+            }
+        };
     }
 
     public function testGetSigningBackendReturnsRegisteredBackend(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['sign']);
 
@@ -65,7 +58,7 @@ class KeyRegistryTest extends TestCase
 
     public function testGetSigningBackendThrowsWhenOperationNotPermitted(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['decrypt']);
 
@@ -75,7 +68,7 @@ class KeyRegistryTest extends TestCase
 
     public function testGetDecryptionBackendReturnsRegisteredBackend(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['decrypt']);
 
@@ -93,7 +86,7 @@ class KeyRegistryTest extends TestCase
 
     public function testGetDecryptionBackendThrowsWhenOperationNotPermitted(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['sign']);
 
@@ -103,7 +96,7 @@ class KeyRegistryTest extends TestCase
 
     public function testKeyWithBothOperationsSupportsSigningAndDecryption(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['sign', 'decrypt']);
 
@@ -113,8 +106,8 @@ class KeyRegistryTest extends TestCase
 
     public function testGetAllBackendsReturnsAllRegisteredBackends(): void
     {
-        $b1 = $this->createBackend('key-a');
-        $b2 = $this->createBackend('key-b');
+        $b1 = $this->createBackend();
+        $b2 = $this->createBackend();
 
         $registry = new KeyRegistry();
         $registry->register('key-a', $b1, ['sign']);
@@ -134,7 +127,7 @@ class KeyRegistryTest extends TestCase
 
     public function testFindBackendReturnsBackendForKnownKey(): void
     {
-        $backend  = $this->createBackend('my-key');
+        $backend  = $this->createBackend();
         $registry = new KeyRegistry();
         $registry->register('my-key', $backend, ['sign']);
 

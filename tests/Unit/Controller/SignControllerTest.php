@@ -11,7 +11,6 @@ use OpenConext\PrivateKeyAgent\Controller\SignController;
 use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
 use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
-use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlService;
 use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
@@ -116,10 +115,6 @@ class SignControllerTest extends TestCase
 
     public function testSignReturns403OnUnauthorizedKey(): void
     {
-        $this->registry->method('getSigningBackend')
-            ->with('other-key')
-            ->willThrowException(new KeyNotFoundException('Key "other-key" not found or does not permit signing'));
-
         $hash    = hash('sha256', 'test', true);
         $request = new Request(
             content: (string) json_encode([

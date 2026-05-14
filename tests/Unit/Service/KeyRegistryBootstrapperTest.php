@@ -7,8 +7,10 @@ namespace OpenConext\PrivateKeyAgent\Tests\Unit\Service;
 use OpenConext\PrivateKeyAgent\Config\AgentConfig;
 use OpenConext\PrivateKeyAgent\Config\ClientConfig;
 use OpenConext\PrivateKeyAgent\Config\KeyConfig;
+use OpenConext\PrivateKeyAgent\Exception\BackendException;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryBootstrapper;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 use function array_values;
@@ -97,5 +99,32 @@ class KeyRegistryBootstrapperTest extends TestCase
         $registry     = $bootstrapper->createRegistry($agentConfig);
 
         $this->assertCount(2, $registry->getAllBackends());
+    }
+
+    public function testCreateRegistryThrowsWhenKeyFileDoesNotExist(): void
+    {
+        $keyConfig   = new KeyConfig(name: 'missing-key', keyPath: '/nonexistent/key.pem', operations: ['sign']);
+        $agentConfig = $this->makeConfig($keyConfig);
+
+        $this->expectException(BackendException::class);
+        $this->expectExceptionMessage('Cannot read key file');
+
+        $bootstrapper = new KeyRegistryBootstrapper(new NullLogger());
+        $bootstrapper->createRegistry($agentConfig);
+    }
+
+    public function testCreateRegistryLogsInfoForEachRegisteredKey(): void
+    {
+        $keyConfig1  = new KeyConfig(name: 'key-one', keyPath: self::$keyPath, operations: ['sign']);
+        $keyConfig2  = new KeyConfig(name: 'key-two', keyPath: self::$keyPath, operations: ['decrypt']);
+        $agentConfig = $this->makeConfig($keyConfig1, $keyConfig2);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->exactly(2))
+            ->method('info')
+            ->with('Registered key', $this->isType('array'));
+
+        $bootstrapper = new KeyRegistryBootstrapper($logger);
+        $bootstrapper->createRegistry($agentConfig);
     }
 }

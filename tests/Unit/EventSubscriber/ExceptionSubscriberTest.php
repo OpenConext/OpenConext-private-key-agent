@@ -214,6 +214,28 @@ class ExceptionSubscriberTest extends TestCase
         $this->assertSame('Internal server error', $body['message']);
     }
 
+    public function testGenericExceptionLogsError(): void
+    {
+        $this->logger->expects($this->once())
+            ->method('error')
+            ->with('Something unexpected');
+
+        $event = new ExceptionEvent(
+            $this->kernel,
+            new Request(),
+            HttpKernelInterface::MAIN_REQUEST,
+            new RuntimeException('Something unexpected'),
+        );
+
+        $this->subscriber->onKernelException($event);
+
+        $response = $event->getResponse();
+        $this->assertNotNull($response);
+        $this->assertSame(500, $response->getStatusCode());
+        $body = json_decode((string) $response->getContent(), true);
+        $this->assertSame('Internal server error', $body['message']);
+    }
+
     public function testAuthenticationExceptionLogsWarning(): void
     {
         $this->logger->expects($this->once())
