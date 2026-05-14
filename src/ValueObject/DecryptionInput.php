@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\ValueObject;
 
+use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 
 use function array_key_exists;
@@ -16,15 +17,6 @@ use function strlen;
 
 final readonly class DecryptionInput
 {
-    private const array ALGORITHMS = [
-        'rsa-pkcs1-v1_5',
-        'rsa-pkcs1-oaep-mgf1-sha1',
-        'rsa-pkcs1-oaep-mgf1-sha224',
-        'rsa-pkcs1-oaep-mgf1-sha256',
-        'rsa-pkcs1-oaep-mgf1-sha384',
-        'rsa-pkcs1-oaep-mgf1-sha512',
-    ];
-
     private const int MIN_CIPHERTEXT_BYTES = 128;
     private const int MAX_CIPHERTEXT_BYTES = 1024;
 
@@ -34,7 +26,7 @@ final readonly class DecryptionInput
 
     private function __construct(public string $algorithm, string $encryptedDataBase64)
     {
-        if (! in_array($algorithm, self::ALGORITHMS, true)) {
+        if (! in_array($algorithm, EncryptionAlgorithm::ALL, true)) {
             throw new InvalidRequestException('Invalid decryption algorithm.');
         }
 

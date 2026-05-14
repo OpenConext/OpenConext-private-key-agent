@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\ValueObject;
 
+use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 
 use function array_key_exists;
@@ -16,18 +17,11 @@ use function strlen;
 
 final readonly class SigningInput
 {
-    private const array ALGORITHMS = [
-        'rsa-pkcs1-v1_5-sha1',
-        'rsa-pkcs1-v1_5-sha256',
-        'rsa-pkcs1-v1_5-sha384',
-        'rsa-pkcs1-v1_5-sha512',
-    ];
-
     private const array HASH_LENGTHS = [
-        'rsa-pkcs1-v1_5-sha1'   => 20,
-        'rsa-pkcs1-v1_5-sha256' => 32,
-        'rsa-pkcs1-v1_5-sha384' => 48,
-        'rsa-pkcs1-v1_5-sha512' => 64,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA1   => 20,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA256 => 32,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA384 => 48,
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA512 => 64,
     ];
 
     private const string BASE64_PATTERN = '/^[A-Za-z0-9+\/]*={0,2}\z/';
@@ -36,7 +30,7 @@ final readonly class SigningInput
 
     private function __construct(public string $algorithm, string $hashBase64)
     {
-        if (! in_array($algorithm, self::ALGORITHMS, true)) {
+        if (! in_array($algorithm, SigningAlgorithm::ALL, true)) {
             throw new InvalidRequestException('Invalid signing algorithm.');
         }
 

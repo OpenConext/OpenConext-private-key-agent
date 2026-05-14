@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Tests\Integration\Backend;
 
 use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
+use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
+use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\BackendException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -81,7 +83,7 @@ class OpenSslBackendTest extends TestCase
     {
         $backend   = new OpenSslBackend('test-key', self::$keyPath);
         $rawHash   = hash('sha256', 'test-message', true);
-        $signature = $backend->sign($rawHash, 'rsa-pkcs1-v1_5-sha256');
+        $signature = $backend->sign($rawHash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA256);
 
         $this->assertSame(self::$modulusBytes, strlen($signature));
 
@@ -98,7 +100,7 @@ class OpenSslBackendTest extends TestCase
         $ciphertext = '';
         openssl_public_encrypt($plaintext, $ciphertext, $this->getPublicKey(), OPENSSL_PKCS1_PADDING);
 
-        $result = $backend->decrypt($ciphertext, 'rsa-pkcs1-v1_5');
+        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RSA_PKCS1_V1_5);
         $this->assertSame($plaintext, $result);
     }
 
@@ -109,7 +111,7 @@ class OpenSslBackendTest extends TestCase
         $ciphertext = '';
         openssl_public_encrypt($plaintext, $ciphertext, $this->getPublicKey(), OPENSSL_PKCS1_OAEP_PADDING);
 
-        $result = $backend->decrypt($ciphertext, 'rsa-pkcs1-oaep-mgf1-sha1');
+        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1);
         $this->assertSame($plaintext, $result);
     }
 
@@ -178,10 +180,10 @@ class OpenSslBackendTest extends TestCase
     public static function oaepSha2AlgorithmProvider(): array
     {
         return [
-            'sha224' => ['rsa-pkcs1-oaep-mgf1-sha224', 'sha224'],
-            'sha256' => ['rsa-pkcs1-oaep-mgf1-sha256', 'sha256'],
-            'sha384' => ['rsa-pkcs1-oaep-mgf1-sha384', 'sha384'],
-            'sha512' => ['rsa-pkcs1-oaep-mgf1-sha512', 'sha512'],
+            'sha224' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224, 'sha224'],
+            'sha256' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256, 'sha256'],
+            'sha384' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384, 'sha384'],
+            'sha512' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512, 'sha512'],
         ];
     }
 }

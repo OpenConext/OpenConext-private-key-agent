@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Backend;
 
 use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
+use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\BackendException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
+use OpenConext\PrivateKeyAgent\Exception\OpenSSLException;
 use OpenSSLAsymmetricKey;
 
 use function file_get_contents;
@@ -27,12 +29,12 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
     private int $modulusBytes;
 
     private const array ALGORITHM_MAP = [
-        'rsa-pkcs1-v1_5'             => ['padding' => OPENSSL_PKCS1_PADDING,      'digest' => null],
-        'rsa-pkcs1-oaep-mgf1-sha1'   => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha1'],
-        'rsa-pkcs1-oaep-mgf1-sha224' => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha224'],
-        'rsa-pkcs1-oaep-mgf1-sha256' => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha256'],
-        'rsa-pkcs1-oaep-mgf1-sha384' => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha384'],
-        'rsa-pkcs1-oaep-mgf1-sha512' => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha512'],
+        EncryptionAlgorithm::RSA_PKCS1_V1_5            => ['padding' => OPENSSL_PKCS1_PADDING,      'digest' => null],
+        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1   => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha1'],
+        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha224'],
+        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha256'],
+        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha384'],
+        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha512'],
     ];
 
     public function __construct(
@@ -44,16 +46,20 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
             throw new BackendException(sprintf('Cannot read key file: %s', $keyPath));
         }
 
+        self::drainOpenSslErrorQueue();
+
         $key = openssl_pkey_get_private($keyContent);
         if ($key === false) {
-            throw new BackendException(sprintf('Invalid private key in: %s', $keyPath));
+            throw new OpenSSLException(sprintf('Invalid private key in: %s', $keyPath));
         }
 
         $this->privateKey = $key;
 
+        self::drainOpenSslErrorQueue();
+
         $details = openssl_pkey_get_details($this->privateKey);
         if ($details === false) {
-            throw new BackendException(sprintf('Failed to read key details from: %s', $keyPath));
+            throw new OpenSSLException(sprintf('Failed to read key details from: %s', $keyPath));
         }
 
         if (! isset($details['rsa']['n'])) {
@@ -70,7 +76,13 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
 
     public function isHealthy(): bool
     {
-        return openssl_pkey_get_details($this->privateKey) !== false;
+        if (openssl_pkey_get_details($this->privateKey) === false) {
+            self::drainOpenSslErrorQueue();
+
+            return false;
+        }
+
+        return true;
     }
 
     public function sign(string $hash, string $algorithm): string
@@ -78,14 +90,13 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         $digestInfo = DigestInfoBuilder::prepend($hash, $algorithm);
 
         $signature = '';
-        $result    = openssl_private_encrypt($digestInfo, $signature, $this->privateKey, OPENSSL_PKCS1_PADDING);
+
+        self::drainOpenSslErrorQueue();
+
+        $result = openssl_private_encrypt($digestInfo, $signature, $this->privateKey, OPENSSL_PKCS1_PADDING);
 
         if ($result === false) {
-            throw new BackendException(sprintf(
-                'OpenSSL signing failed for key "%s": %s',
-                $this->name,
-                openssl_error_string() ?: 'unknown error',
-            ));
+            throw new OpenSSLException(sprintf('OpenSSL signing failed for key "%s"', $this->name));
         }
 
         return $signature;
@@ -108,6 +119,8 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
 
         $decrypted = '';
 
+        self::drainOpenSslErrorQueue();
+
         // PHP 8.5+ supports digest_algo named parameter for OAEP with SHA-2
         if ($spec['digest'] !== null && $spec['digest'] !== 'sha1') {
             $result = openssl_private_decrypt(
@@ -127,13 +140,15 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         }
 
         if ($result === false) {
-            throw new BackendException(sprintf(
-                'OpenSSL decryption failed for key "%s": %s',
-                $this->name,
-                openssl_error_string() ?: 'unknown error',
-            ));
+            throw new OpenSSLException(sprintf('OpenSSL decryption failed for key "%s"', $this->name));
         }
 
         return $decrypted;
+    }
+
+    private static function drainOpenSslErrorQueue(): void
+    {
+        while (openssl_error_string() !== false) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedWhile
+        }
     }
 }

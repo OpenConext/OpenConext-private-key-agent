@@ -170,7 +170,7 @@ All endpoints except `/v1/health` and `/v1/health/key/{key_name}` require a Bear
 
 ### Rate limiting
 
-Rate limiting is **deliberately out of scope** for this application.
+Rate limiting is **deliberately out of scope** for this application. It is assumed to be handled by the upstream infrastucture.
 
 #### Rationale
 
@@ -605,7 +605,57 @@ interface DecryptionBackendInterface extends BackendInterface
 - Implements both `SigningBackendInterface` and `DecryptionBackendInterface`.
 - Signing: delegates to `DigestInfoBuilder` to prepend the DER-encoded DigestInfo prefix, then calls `openssl_private_encrypt()` with `OPENSSL_PKCS1_PADDING`.
 - Decryption: maps algorithm string to the appropriate `openssl_private_decrypt()` padding constant and optional `digest_algo` value (PHP 8.5+). For OAEP algorithms, passes the hash algorithm name via `digest_algo` (PHP 8.5+).
-- `isHealthy()` returns `true` if the key loaded successfully at boot.
+- `isHealthy()` returns `true` if `openssl_pkey_get_details()` succeeds on the loaded key; see the [OpenSSL error queue](#opensslexception-and-openssl-error-queue-management) section below for drain semantics.
+- All OpenSSL failures are reported through `OpenSSLException`, which drains the full error queue into the exception message.
+
+### `OpenSSLException` and OpenSSL error queue management
+
+#### The problem
+
+PHP's OpenSSL extension maintains a **global, per-process error queue** that accumulates error entries whenever an OpenSSL call fails or encounters a non-fatal internal condition. A key property of this queue is that it **persists across requests** within the same Apache worker process.
+
+Under Apache mod_php with the prefork MPM, each child process handles many requests sequentially before being recycled (`MaxConnectionsPerChild`). This means that if a request causes an OpenSSL error — even one that is caught and handled — those error entries remain in the queue and will be seen by subsequent requests in the same worker.
+
+If a later request then calls `openssl_error_string()` to inspect the cause of a fresh failure, it will read stale entries from the previous request's error alongside the new one, producing a misleading exception message.
+
+#### `OpenSSLException`
+
+`OpenSSLException` (`src/Exception/OpenSSLException.php`) extends `BackendException`. Its constructor drains the **entire** OpenSSL error queue (not just the first entry) and appends all collected error strings to the exception message, separated by `;`:
+
+```
+OpenSSL signing failed for key "dev-key": error:0200100D:...; error:09091064:...
+```
+
+If the queue is empty when the exception is constructed, the fallback detail `unknown OpenSSL error` is used. After construction the queue is guaranteed to be empty.
+
+#### Pre-drain before each OpenSSL call
+
+To ensure that the exception message contains **only the errors belonging to the failing call**, `OpenSslBackend` drains the error queue immediately before every OpenSSL call that may raise an `OpenSSLException`:
+
+```php
+self::drainOpenSslErrorQueue();
+$result = openssl_private_encrypt(...);
+if ($result === false) {
+    throw new OpenSSLException('OpenSSL signing failed for key "..."');
+}
+```
+
+Without the pre-drain, stale entries from an earlier (successful or previously-handled) operation in the same worker process would be mixed into the exception message.
+
+The drain is centralised in the private static helper `OpenSslBackend::drainOpenSslErrorQueue()`, which contains the single `while (openssl_error_string() !== false) {}` loop with its accompanying `phpcs:ignore` annotation.
+
+#### Post-drain in `isHealthy()`
+
+`isHealthy()` calls `openssl_pkey_get_details()` and **returns `false`** on failure rather than throwing. Because no exception is raised, the error queue is never drained by `OpenSSLException`. A post-drain is therefore applied explicitly after the failed call:
+
+```php
+if (openssl_pkey_get_details($this->privateKey) === false) {
+    self::drainOpenSslErrorQueue();
+    return false;
+}
+```
+
+Without this, a health-check failure during request N would leave error entries that appear in the `OpenSSLException` message for a `sign()` or `decrypt()` failure during a later request N+1, even though the two failures are unrelated.
 
 ### `ValidateConfigCommand`
 
@@ -624,6 +674,7 @@ interface DecryptionBackendInterface extends BackendInterface
 `SigningInput` (`src/ValueObject/SigningInput.php`) and `DecryptionInput` (`src/ValueObject/DecryptionInput.php`) are immutable `final readonly` value objects. They replace the old mutable Symfony Validator DTOs. All validation and base64 decoding is performed eagerly in the private constructor; the factory method `fromArray()` handles field presence and type checks before constructing the object.
 
 Both classes follow the same pattern:
+
 - `fromArray(array $data): self` — public factory; validates field presence and string types, then delegates to the private constructor.
 - Private constructor with promoted `$algorithm` parameter and a non-promoted `$xyzBytes` property set after decoding.
 - `decodeBase64(string $value, string $fieldName): string` — private static helper; rejects empty strings, rejects non-standard Base64 characters (e.g., whitespace, URL-safe chars, misplaced padding) using a strict regex, then decodes.
@@ -657,6 +708,7 @@ final readonly class SigningInput
 ```
 
 Properties exposed after successful construction:
+
 - `$algorithm` — one of the four `rsa-pkcs1-v1_5-sha*` algorithm identifiers.
 - `$hashBytes` — raw binary hash (decoded from the `hash` request field); length matches the algorithm's expected digest length.
 
@@ -684,6 +736,7 @@ final readonly class DecryptionInput
 ```
 
 Properties exposed after successful construction:
+
 - `$algorithm` — one of the six supported RSA decryption algorithm identifiers.
 - `$ciphertextBytes` — raw binary ciphertext (decoded from the `encrypted_data` request field); length is validated to be 128–1024 bytes.
 

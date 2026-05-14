@@ -12,9 +12,10 @@ interface SigningBackendInterface extends BackendInterface
     /**
      * Signs a hash using the configured private key.
      *
+     * @see \OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm for valid algorithm identifiers.
+     *
      * @param string $hash      Raw hash bytes (not base64)
-     * @param string $algorithm One of: rsa-pkcs1-v1_5-sha1, rsa-pkcs1-v1_5-sha256,
-     *                          rsa-pkcs1-v1_5-sha384, rsa-pkcs1-v1_5-sha512
+     * @param string $algorithm Signing algorithm identifier.
      *
      * @return string Raw signature bytes (not base64)
      *

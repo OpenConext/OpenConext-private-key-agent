@@ -17,14 +17,16 @@ final class DigestInfoBuilder
      * structure expected by PKCS#1 v1.5 RSA signing.
      */
     private const array PREFIXES = [
-        'rsa-pkcs1-v1_5-sha1'   => '3021300906052b0e03021a05000414',
-        'rsa-pkcs1-v1_5-sha256' => '3031300d060960864801650304020105000420',
-        'rsa-pkcs1-v1_5-sha384' => '3041300d060960864801650304020205000430',
-        'rsa-pkcs1-v1_5-sha512' => '3051300d060960864801650304020305000440',
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA1   => '3021300906052b0e03021a05000414',
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA256 => '3031300d060960864801650304020105000420',
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA384 => '3041300d060960864801650304020205000430',
+        SigningAlgorithm::RSA_PKCS1_V1_5_SHA512 => '3051300d060960864801650304020305000440',
     ];
 
     /**
      * Prepends the DER-encoded DigestInfo prefix to the raw hash bytes.
+     *
+     * @see SigningAlgorithm for valid algorithm identifiers.
      *
      * @param string $hash      Raw hash bytes
      * @param string $algorithm Algorithm identifier (e.g. 'rsa-pkcs1-v1_5-sha256')
