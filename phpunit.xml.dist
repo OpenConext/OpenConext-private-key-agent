@@ -23,7 +23,6 @@
 
         <!-- ###+ symfony/framework-bundle ### -->
         <env name="APP_SECRET" value="test-secret-not-for-production"/>
-        <env name="APP_SHARE_DIR" value="var/share"/>
         <!-- ###- symfony/framework-bundle ### -->
 
         <!-- ###+ symfony/routing ### -->
