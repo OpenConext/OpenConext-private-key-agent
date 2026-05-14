@@ -5,18 +5,16 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Controller;
 
 use OpenConext\PrivateKeyAgent\Config\KeyName;
-use OpenConext\PrivateKeyAgent\Dto\SignRequest;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlInterface;
 use OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\ValueObject\SigningInput;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
-use function base64_decode;
 use function base64_encode;
 use function hrtime;
 use function is_array;
@@ -29,7 +27,6 @@ final class SignController
         private readonly AuthenticatorInterface $authenticator,
         private readonly AccessControlInterface $accessControl,
         private readonly KeyRegistryInterface $keyRegistry,
-        private readonly ValidatorInterface $validator,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -46,38 +43,25 @@ final class SignController
             throw new InvalidRequestException('Invalid JSON body');
         }
 
-        $signRequest            = new SignRequest();
-        $signRequest->algorithm = $data['algorithm'] ?? '';
-        $signRequest->hash      = $data['hash'] ?? '';
+        $input = SigningInput::fromArray($data);
 
-        $violations = $this->validator->validate($signRequest);
-        if ($violations->count() > 0) {
-            throw new InvalidRequestException((string) $violations->get(0)->getMessage());
-        }
-
-        $backend = $this->keyRegistry->getSigningBackend($keyName);
-
-        $hashBytes = base64_decode($signRequest->hash, true);
-        if ($hashBytes === false) {
-            throw new InvalidRequestException('Invalid base64-encoded hash');
-        }
-
+        $backend        = $this->keyRegistry->getSigningBackend($keyName);
         $start          = hrtime(true);
-        $signatureBytes = $backend->sign($hashBytes, $signRequest->algorithm);
+        $signatureBytes = $backend->sign($input->hashBytes, $input->algorithm);
         $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
 
         $this->logger->debug('sign completed', [
             'key'        => $keyName,
-            'algorithm'  => $signRequest->algorithm,
+            'algorithm'  => $input->algorithm,
             'durationMs' => $durationMs,
             'backend'    => $backend->getName(),
         ]);
 
         $this->logger->info('Signing request processed', [
-            'client' => $client->name,
-            'key' => $keyName,
-            'algorithm' => $signRequest->algorithm,
-            'backend' => $backend->getName(),
+            'client'    => $client->name,
+            'key'       => $keyName,
+            'algorithm' => $input->algorithm,
+            'backend'   => $backend->getName(),
         ]);
 
         return new JsonResponse([

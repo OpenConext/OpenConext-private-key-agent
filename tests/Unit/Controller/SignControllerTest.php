@@ -19,7 +19,6 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Validator\Validation;
 
 use function base64_encode;
 use function hash;
@@ -52,7 +51,6 @@ class SignControllerTest extends TestCase
             authenticator: $this->authenticator,
             accessControl: new AccessControlService(),
             keyRegistry: $this->registry,
-            validator: Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator(),
             logger: new NullLogger(),
         );
     }
@@ -60,12 +58,14 @@ class SignControllerTest extends TestCase
     public function testSignReturnsBase64Signature(): void
     {
         $signatureBytes = random_bytes(256);
+        $hash           = hash('sha256', 'test', true);
         $backend        = $this->createMock(SigningBackendInterface::class);
-        $backend->method('sign')->willReturn($signatureBytes);
+        $backend->method('sign')
+            ->with($hash, 'rsa-pkcs1-v1_5-sha256')
+            ->willReturn($signatureBytes);
         $backend->method('getName')->willReturn('my-key');
         $this->registry->method('getSigningBackend')->with('my-key')->willReturn($backend);
 
-        $hash    = hash('sha256', 'test', true);
         $request = new Request(
             content: (string) json_encode([
                 'algorithm' => 'rsa-pkcs1-v1_5-sha256',

@@ -17,7 +17,6 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Validator\Validation;
 
 use function base64_encode;
 use function json_decode;
@@ -47,23 +46,25 @@ class DecryptControllerTest extends TestCase
             authenticator: new TokenAuthenticator($config),
             accessControl: new AccessControlService(),
             keyRegistry: $this->registry,
-            validator: Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator(),
             logger: new NullLogger(),
         );
     }
 
     public function testDecryptReturnsBase64Plaintext(): void
     {
-        $plaintext = 'decrypted data';
-        $backend   = $this->createMock(DecryptionBackendInterface::class);
-        $backend->method('decrypt')->willReturn($plaintext);
+        $plaintext       = 'decrypted data';
+        $ciphertextBytes = random_bytes(256);
+        $backend         = $this->createMock(DecryptionBackendInterface::class);
+        $backend->method('decrypt')
+            ->with($ciphertextBytes, 'rsa-pkcs1-v1_5')
+            ->willReturn($plaintext);
         $backend->method('getName')->willReturn('my-key');
         $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
 
         $request = new Request(
             content: (string) json_encode([
                 'algorithm' => 'rsa-pkcs1-v1_5',
-                'encrypted_data' => base64_encode(random_bytes(256)),
+                'encrypted_data' => base64_encode($ciphertextBytes),
             ]),
         );
         $request->headers->set('Authorization', 'Bearer test-token');

@@ -5,18 +5,16 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Controller;
 
 use OpenConext\PrivateKeyAgent\Config\KeyName;
-use OpenConext\PrivateKeyAgent\Dto\DecryptRequest;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlInterface;
 use OpenConext\PrivateKeyAgent\Security\AuthenticatorInterface;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
+use OpenConext\PrivateKeyAgent\ValueObject\DecryptionInput;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
-use function base64_decode;
 use function base64_encode;
 use function hrtime;
 use function is_array;
@@ -29,7 +27,6 @@ final class DecryptController
         private readonly AuthenticatorInterface $authenticator,
         private readonly AccessControlInterface $accessControl,
         private readonly KeyRegistryInterface $keyRegistry,
-        private readonly ValidatorInterface $validator,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -46,38 +43,25 @@ final class DecryptController
             throw new InvalidRequestException('Invalid JSON body');
         }
 
-        $decryptRequest                = new DecryptRequest();
-        $decryptRequest->algorithm     = $data['algorithm'] ?? '';
-        $decryptRequest->encryptedData = $data['encrypted_data'] ?? '';
+        $input = DecryptionInput::fromArray($data);
 
-        $violations = $this->validator->validate($decryptRequest);
-        if ($violations->count() > 0) {
-            throw new InvalidRequestException((string) $violations->get(0)->getMessage());
-        }
-
-        $backend = $this->keyRegistry->getDecryptionBackend($keyName);
-
-        $ciphertextBytes = base64_decode($decryptRequest->encryptedData, true);
-        if ($ciphertextBytes === false) {
-            throw new InvalidRequestException('Invalid base64-encoded encrypted_data');
-        }
-
+        $backend        = $this->keyRegistry->getDecryptionBackend($keyName);
         $start          = hrtime(true);
-        $plaintextBytes = $backend->decrypt($ciphertextBytes, $decryptRequest->algorithm);
+        $plaintextBytes = $backend->decrypt($input->ciphertextBytes, $input->algorithm);
         $durationMs     = (int) round((hrtime(true) - $start) / 1_000_000);
 
         $this->logger->debug('decrypt completed', [
             'key'        => $keyName,
-            'algorithm'  => $decryptRequest->algorithm,
+            'algorithm'  => $input->algorithm,
             'durationMs' => $durationMs,
             'backend'    => $backend->getName(),
         ]);
 
         $this->logger->info('Decryption request processed', [
-            'client' => $client->name,
-            'key' => $keyName,
-            'algorithm' => $decryptRequest->algorithm,
-            'backend' => $backend->getName(),
+            'client'    => $client->name,
+            'key'       => $keyName,
+            'algorithm' => $input->algorithm,
+            'backend'   => $backend->getName(),
         ]);
 
         return new JsonResponse([

@@ -12,7 +12,7 @@
         "symfony/property-access": "^7.4",
         "symfony/runtime": "^7.4",
         "symfony/serializer": "^7.4",
-        "symfony/validator": "^7.4",
+        "symfony/translation-contracts": "^3.7",
         "symfony/yaml": "^7.4"
     },
     "require-dev": {

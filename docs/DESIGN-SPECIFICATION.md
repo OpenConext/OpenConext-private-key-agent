@@ -401,12 +401,11 @@ Each entry in `keys` defines a logical key identity backed by a single PEM file.
 | `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, key, and client configuration |
 | `src/Controller/` | REST API controllers: `SignController`, `DecryptController`, `HealthController` |
 | `src/Crypto/` | Low-level cryptographic utilities; currently `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing) |
-| `src/Dto/` | Request data transfer objects (`SignRequest`, `DecryptRequest`) with Symfony validation constraints |
+| `src/ValueObject/` | Immutable input value objects (`SigningInput`, `DecryptionInput`) that validate and decode request data in their constructors |
 | `src/EventSubscriber/` | `ExceptionSubscriber` maps domain exceptions to RFC 6750 HTTP error responses |
 | `src/Exception/` | Domain exception hierarchy (`AuthenticationException`, `AccessDeniedException`, `BackendException`, `InvalidRequestException`, `InvalidConfigurationException`) |
 | `src/Security/` | Authentication (`TokenAuthenticator`) and key-level access control (`AccessControlService`) |
 | `src/Service/` | Key registry (`KeyRegistry`, `KeyRegistryBootstrapper`, `KeyRegistryInterface`) — maps logical key names to backend instances |
-| `src/Validator/` | Custom Symfony validation constraint (`Base64`, `Base64Validator`) |
 | `tests/Unit/` | Unit tests using mocks; no I/O or cryptographic operations required |
 | `tests/Integration/` | Integration tests for the OpenSSL backends against real key material |
 | `tools/` | Operator scripts (smoke test endpoint script) |
@@ -620,14 +619,19 @@ interface DecryptionBackendInterface extends BackendInterface
 
 ---
 
-## Request DTO Validation
+## Request Input Value Objects
 
-`#[Assert\Base64]` is a custom validation constraint (defined in `src/Validator/Base64.php` and `Base64Validator.php`). It validates that the value is a valid Base64-encoded string.
+`SigningInput` (`src/ValueObject/SigningInput.php`) and `DecryptionInput` (`src/ValueObject/DecryptionInput.php`) are immutable `final readonly` value objects. They replace the old mutable Symfony Validator DTOs. All validation and base64 decoding is performed eagerly in the private constructor; the factory method `fromArray()` handles field presence and type checks before constructing the object.
 
-### `SignRequest`
+Both classes follow the same pattern:
+- `fromArray(array $data): self` — public factory; validates field presence and string types, then delegates to the private constructor.
+- Private constructor with promoted `$algorithm` parameter and a non-promoted `$xyzBytes` property set after decoding.
+- `decodeBase64(string $value, string $fieldName): string` — private static helper; rejects empty strings, rejects non-standard Base64 characters (e.g., whitespace, URL-safe chars, misplaced padding) using a strict regex, then decodes.
+
+### `SigningInput`
 
 ```php
-final class SignRequest
+final readonly class SigningInput
 {
     private const array ALGORITHMS = [
         'rsa-pkcs1-v1_5-sha1',
@@ -643,48 +647,23 @@ final class SignRequest
         'rsa-pkcs1-v1_5-sha512' => 64,
     ];
 
-    #[Assert\NotBlank]
-    #[Assert\Choice(choices: self::ALGORITHMS, message: 'Invalid signing algorithm.')]
-    public string $algorithm = '';
+    public string $hashBytes;
 
-    #[Assert\NotBlank]
-    #[Assert\Base64]
-    public string $hash = '';
+    private function __construct(public string $algorithm, string $hashBase64) { ... }
 
-    #[Assert\Callback]
-    public function validateHashLength(ExecutionContextInterface $context): void
-    {
-        if (!in_array($this->algorithm, self::ALGORITHMS, true)) {
-            return; // algorithm already fails #[Assert\Choice]
-        }
-        if ($this->hash === '') {
-            return; // NotBlank will handle this
-        }
-        $decoded = base64_decode($this->hash, strict: true);
-        if ($decoded === false) {
-            return; // Base64 validator will handle this
-        }
-        $expectedLength = self::HASH_LENGTHS[$this->algorithm];
-        $actualLength   = strlen($decoded);
-        if ($actualLength === $expectedLength) {
-            return;
-        }
-        $context->buildViolation(sprintf(
-            'Hash length %d bytes does not match expected %d bytes for %s.',
-            $actualLength,
-            $expectedLength,
-            $this->algorithm,
-        ))
-            ->atPath('hash')
-            ->addViolation();
-    }
+    /** @param array<string, mixed> $data */
+    public static function fromArray(array $data): self { ... }
 }
 ```
 
-### `DecryptRequest`
+Properties exposed after successful construction:
+- `$algorithm` — one of the four `rsa-pkcs1-v1_5-sha*` algorithm identifiers.
+- `$hashBytes` — raw binary hash (decoded from the `hash` request field); length matches the algorithm's expected digest length.
+
+### `DecryptionInput`
 
 ```php
-final class DecryptRequest
+final readonly class DecryptionInput
 {
     private const array ALGORITHMS = [
         'rsa-pkcs1-v1_5',
@@ -695,38 +674,20 @@ final class DecryptRequest
         'rsa-pkcs1-oaep-mgf1-sha512',
     ];
 
-    #[Assert\NotBlank]
-    #[Assert\Choice(choices: self::ALGORITHMS, message: 'Invalid decryption algorithm.')]
-    public string $algorithm = '';
+    public string $ciphertextBytes;
 
-    #[Assert\NotBlank]
-    #[Assert\Base64]
-    public string $encryptedData = '';
+    private function __construct(public string $algorithm, string $encryptedDataBase64) { ... }
 
-    #[Assert\Callback]
-    public function validateRequest(ExecutionContextInterface $context): void
-    {
-        // encrypted_data must decode to a plausible RSA ciphertext length (128–1024 bytes
-        // covers RSA-1024 through RSA-8192; catches obviously malformed inputs early)
-        if ($this->encryptedData !== '') {
-            $decoded = base64_decode($this->encryptedData, strict: true);
-            if ($decoded !== false) {
-                $len = strlen($decoded);
-                if ($len < 128 || $len > 1024) {
-                    $context->buildViolation(sprintf(
-                        'Encrypted data must be 128-1024 bytes, got %d bytes.',
-                        $len,
-                    ))
-                        ->atPath('encryptedData')
-                        ->addViolation();
-                }
-            }
-        }
-    }
+    /** @param array<string, mixed> $data */
+    public static function fromArray(array $data): self { ... }
 }
 ```
 
-> **Exact modulus-length check (backend responsibility):** The ciphertext must be exactly `modulus_bytes` long (e.g., 256 bytes for RSA-2048). This cannot be checked at DTO validation time because the key size is only known after the backend is resolved. Each decryption backend (`OpenSslDecryptionBackend`) validates `strlen(ciphertext) === $this->getModulusBytes()` before attempting decryption and throws `InvalidRequestException` (→ 400) on mismatch, not `BackendException` (→ 500).
+Properties exposed after successful construction:
+- `$algorithm` — one of the six supported RSA decryption algorithm identifiers.
+- `$ciphertextBytes` — raw binary ciphertext (decoded from the `encrypted_data` request field); length is validated to be 128–1024 bytes.
+
+> **Exact modulus-length check (backend responsibility):** The ciphertext must be exactly `modulus_bytes` long (e.g., 256 bytes for RSA-2048). This cannot be checked at input validation time because the key size is only known after the backend is resolved. Each decryption backend (`OpenSslDecryptionBackend`) validates `strlen(ciphertext) === $this->getModulusBytes()` before attempting decryption and throws `InvalidRequestException` (→ 400) on mismatch, not `BackendException` (→ 500).
 
 ---
 
@@ -756,7 +717,6 @@ Monolog with a JSON formatter writes to stdout (12-factor app). The log level is
     "symfony/runtime": "^7.4",
     "symfony/security-bundle": "^7.4",
     "symfony/serializer": "^7.4",
-    "symfony/validator": "^7.4",
     "symfony/yaml": "^7.4"
   },
   "require-dev": {
@@ -807,7 +767,7 @@ The test suite is split into two directories with different infrastructure requi
 
 All services, controllers, authenticator, exception subscriber, DTOs, config loader, command, and validators are tested with PHPUnit using mocks or pure PHP. No cryptographic operations are performed and no key material is required. These tests run on any standard PHP environment and are always part of the main CI pipeline.
 
-Unit test coverage includes: `ValidateConfigCommand`, `ConfigLoader`, `ConfigProvider`, `DecryptController`, `HealthController`, `SignController`, `DigestInfoBuilder`, `DecryptRequest`, `SignRequest`, `ExceptionSubscriber`, `AccessControlService`, `TokenAuthenticator`, `KeyRegistryBootstrapper`, `KeyRegistry`, `Base64Validator`.
+Unit test coverage includes: `ValidateConfigCommand`, `ConfigLoader`, `ConfigProvider`, `DecryptController`, `HealthController`, `SignController`, `DigestInfoBuilder`, `DecryptionInput`, `SigningInput`, `ExceptionSubscriber`, `AccessControlService`, `TokenAuthenticator`, `KeyRegistryBootstrapper`, `KeyRegistry`.
 
 ### Integration tests (`tests/Integration/`)
 
