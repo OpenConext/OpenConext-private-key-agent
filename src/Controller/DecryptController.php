@@ -50,7 +50,7 @@ final class DecryptController
             $this->logger->warning('Decryption failed (invalid ciphertext)', [
                 'client'    => $client->name,
                 'key'       => $keyName,
-                'algorithm' => $input->algorithm,
+                'algorithm' => $input->algorithm->value,
             ]);
 
             throw new InvalidRequestException('Decryption failed');
@@ -60,7 +60,7 @@ final class DecryptController
 
         $this->logger->debug('decrypt completed', [
             'key'        => $keyName,
-            'algorithm'  => $input->algorithm,
+            'algorithm'  => $input->algorithm->value,
             'durationMs' => $durationMs,
             'backend'    => $backend->getName(),
         ]);
@@ -68,7 +68,7 @@ final class DecryptController
         $this->logger->info('Decryption request processed', [
             'client'    => $client->name,
             'key'       => $keyName,
-            'algorithm' => $input->algorithm,
+            'algorithm' => $input->algorithm->value,
             'backend'   => $backend->getName(),
         ]);
 

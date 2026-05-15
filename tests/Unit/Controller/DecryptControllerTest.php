@@ -8,6 +8,7 @@ use OpenConext\PrivateKeyAgent\Backend\DecryptionBackendInterface;
 use OpenConext\PrivateKeyAgent\Config\AgentConfig;
 use OpenConext\PrivateKeyAgent\Config\ClientConfig;
 use OpenConext\PrivateKeyAgent\Controller\DecryptController;
+use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
 use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
@@ -58,7 +59,7 @@ class DecryptControllerTest extends TestCase
         $ciphertextBytes = random_bytes(256);
         $backend         = $this->createMock(DecryptionBackendInterface::class);
         $backend->method('decrypt')
-            ->with($ciphertextBytes, 'rsa-pkcs1-v1_5')
+            ->with($ciphertextBytes, EncryptionAlgorithm::RsaPkcs1V15)
             ->willReturn($plaintext);
         $backend->method('getName')->willReturn('my-key');
         $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);

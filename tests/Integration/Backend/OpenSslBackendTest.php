@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\Tests\Integration\Backend;
 
+use Error;
 use OpenConext\PrivateKeyAgent\Backend\OpenSslBackend;
 use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
 use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
@@ -83,7 +84,7 @@ class OpenSslBackendTest extends TestCase
     }
 
     #[DataProvider('signAlgorithmProvider')]
-    public function testSignRoundtrip(string $algorithm, string $digest): void
+    public function testSignRoundtrip(SigningAlgorithm $algorithm, string $digest): void
     {
         $backend   = new OpenSslBackend('test-key', self::$keyPath);
         $rawHash   = hash($digest, 'test-message', true);
@@ -97,14 +98,14 @@ class OpenSslBackendTest extends TestCase
         $this->assertSame(DigestInfoBuilder::prepend($rawHash, $algorithm), $decrypted);
     }
 
-    /** @return array<string, array{string, string}> */
+    /** @return array<string, array{SigningAlgorithm, string}> */
     public static function signAlgorithmProvider(): array
     {
         return [
-            'sha1'   => [SigningAlgorithm::RSA_PKCS1_V1_5_SHA1,   'sha1'],
-            'sha256' => [SigningAlgorithm::RSA_PKCS1_V1_5_SHA256, 'sha256'],
-            'sha384' => [SigningAlgorithm::RSA_PKCS1_V1_5_SHA384, 'sha384'],
-            'sha512' => [SigningAlgorithm::RSA_PKCS1_V1_5_SHA512, 'sha512'],
+            'sha1'   => [SigningAlgorithm::RsaPkcs1V15Sha1,   'sha1'],
+            'sha256' => [SigningAlgorithm::RsaPkcs1V15Sha256, 'sha256'],
+            'sha384' => [SigningAlgorithm::RsaPkcs1V15Sha384, 'sha384'],
+            'sha512' => [SigningAlgorithm::RsaPkcs1V15Sha512, 'sha512'],
         ];
     }
 
@@ -115,7 +116,7 @@ class OpenSslBackendTest extends TestCase
         $ciphertext = '';
         openssl_public_encrypt($plaintext, $ciphertext, $this->getPublicKey(), OPENSSL_PKCS1_PADDING);
 
-        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RSA_PKCS1_V1_5);
+        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RsaPkcs1V15);
         $this->assertSame($plaintext, $result);
     }
 
@@ -126,7 +127,7 @@ class OpenSslBackendTest extends TestCase
         $ciphertext = '';
         openssl_public_encrypt($plaintext, $ciphertext, $this->getPublicKey(), OPENSSL_PKCS1_OAEP_PADDING);
 
-        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1);
+        $result = $backend->decrypt($ciphertext, EncryptionAlgorithm::RsaOaepMgf1Sha1);
         $this->assertSame($plaintext, $result);
     }
 
@@ -136,16 +137,7 @@ class OpenSslBackendTest extends TestCase
 
         $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('Ciphertext length');
-        $backend->decrypt(str_repeat("\x00", 10), 'rsa-pkcs1-v1_5');
-    }
-
-    public function testDecryptThrowsOnUnsupportedAlgorithm(): void
-    {
-        $backend = new OpenSslBackend('test-key', self::$keyPath);
-
-        $this->expectException(BackendException::class);
-        $this->expectExceptionMessage('Unsupported algorithm');
-        $backend->decrypt(str_repeat("\x00", self::$modulusBytes), 'rsa-unknown-algo');
+        $backend->decrypt(str_repeat("\x00", 10), EncryptionAlgorithm::RsaPkcs1V15);
     }
 
     public function testConstructorThrowsOnInvalidKeyContent(): void
@@ -209,14 +201,14 @@ class OpenSslBackendTest extends TestCase
         $this->expectExceptionMessage('OpenSSL signing failed');
 
         try {
-            $backend->sign($rawHash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA384);
+            $backend->sign($rawHash, SigningAlgorithm::RsaPkcs1V15Sha384);
         } finally {
             @unlink($tmpFile);
         }
     }
 
     #[DataProvider('oaepSha2AlgorithmProvider')]
-    public function testDecryptRoundtripWithOaepSha2(string $algorithm, string $digest): void
+    public function testDecryptRoundtripWithOaepSha2(EncryptionAlgorithm $algorithm, string $digest): void
     {
         $backend    = new OpenSslBackend('test-key', self::$keyPath);
         $plaintext  = 'secret-sha2-message';
@@ -228,14 +220,31 @@ class OpenSslBackendTest extends TestCase
         $this->assertSame($plaintext, $result);
     }
 
-    /** @return array<string, array{string, string}> */
+    /** @return array<string, array{EncryptionAlgorithm, string}> */
     public static function oaepSha2AlgorithmProvider(): array
     {
         return [
-            'sha224' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224, 'sha224'],
-            'sha256' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256, 'sha256'],
-            'sha384' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384, 'sha384'],
-            'sha512' => [EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512, 'sha512'],
+            'sha224' => [EncryptionAlgorithm::RsaOaepMgf1Sha224, 'sha224'],
+            'sha256' => [EncryptionAlgorithm::RsaOaepMgf1Sha256, 'sha256'],
+            'sha384' => [EncryptionAlgorithm::RsaOaepMgf1Sha384, 'sha384'],
+            'sha512' => [EncryptionAlgorithm::RsaOaepMgf1Sha512, 'sha512'],
         ];
+    }
+
+    public function testDecryptCoversAllAlgorithmCases(): void
+    {
+        $backend = new OpenSslBackend('test-key', self::$keyPath);
+        foreach (EncryptionAlgorithm::cases() as $algorithm) {
+            try {
+                $backend->decrypt(str_repeat("\x00", self::$modulusBytes), $algorithm);
+                // Success is fine — we only care that no UnhandledMatchError occurs
+            } catch (Error $e) {
+                $this->fail('Got unhandled match error for ' . $algorithm->value . ': ' . $e->getMessage());
+            } catch (Throwable) {
+                // Any normal exception (OpenSSLException, BackendException, etc.) is fine
+            }
+
+            $this->addToAssertionCount(1);
+        }
     }
 }

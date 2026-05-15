@@ -8,6 +8,7 @@ use OpenConext\PrivateKeyAgent\Backend\SigningBackendInterface;
 use OpenConext\PrivateKeyAgent\Config\AgentConfig;
 use OpenConext\PrivateKeyAgent\Config\ClientConfig;
 use OpenConext\PrivateKeyAgent\Controller\SignController;
+use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
 use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
@@ -60,7 +61,7 @@ class SignControllerTest extends TestCase
         $hash           = hash('sha256', 'test', true);
         $backend        = $this->createMock(SigningBackendInterface::class);
         $backend->method('sign')
-            ->with($hash, 'rsa-pkcs1-v1_5-sha256')
+            ->with($hash, SigningAlgorithm::RsaPkcs1V15Sha256)
             ->willReturn($signatureBytes);
         $backend->method('getName')->willReturn('my-key');
         $this->registry->method('getSigningBackend')->with('my-key')->willReturn($backend);

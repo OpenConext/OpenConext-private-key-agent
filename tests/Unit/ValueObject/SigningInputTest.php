@@ -19,11 +19,11 @@ class SigningInputTest extends TestCase
     public function testValidSha1With20Bytes(): void
     {
         $input = SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA1,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha1->value,
             'hash' => base64_encode(random_bytes(20)),
         ]);
 
-        $this->assertSame(SigningAlgorithm::RSA_PKCS1_V1_5_SHA1, $input->algorithm);
+        $this->assertSame(SigningAlgorithm::RsaPkcs1V15Sha1, $input->algorithm);
         $this->assertSame(20, strlen($input->hashBytes));
     }
 
@@ -31,18 +31,18 @@ class SigningInputTest extends TestCase
     {
         $hash  = random_bytes(32);
         $input = SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => base64_encode($hash),
         ]);
 
-        $this->assertSame(SigningAlgorithm::RSA_PKCS1_V1_5_SHA256, $input->algorithm);
+        $this->assertSame(SigningAlgorithm::RsaPkcs1V15Sha256, $input->algorithm);
         $this->assertSame($hash, $input->hashBytes);
     }
 
     public function testValidSha384With48Bytes(): void
     {
         $input = SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA384,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha384->value,
             'hash' => base64_encode(random_bytes(48)),
         ]);
 
@@ -52,7 +52,7 @@ class SigningInputTest extends TestCase
     public function testValidSha512With64Bytes(): void
     {
         $input = SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA512,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha512->value,
             'hash' => base64_encode(random_bytes(64)),
         ]);
 
@@ -87,7 +87,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded hash.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => "YQ==\n",
         ]);
     }
@@ -98,7 +98,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded hash.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => 'not!!valid!!base64',
         ]);
     }
@@ -109,7 +109,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded hash.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => base64_encode(random_bytes(32)) . "\n",
         ]);
     }
@@ -121,7 +121,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded hash.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => 'dGVzdA-_dGVzdA==',
         ]);
     }
@@ -132,7 +132,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded hash.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => '=YQ==',
         ]);
     }
@@ -143,7 +143,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('The hash field must not be empty.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => '',
         ]);
     }
@@ -153,11 +153,11 @@ class SigningInputTest extends TestCase
         $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage(sprintf(
             'Hash length 20 bytes does not match expected 32 bytes for %s.',
-            SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            SigningAlgorithm::RsaPkcs1V15Sha256->value,
         ));
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => base64_encode(random_bytes(20)), // SHA-1 length
         ]);
     }
@@ -175,7 +175,7 @@ class SigningInputTest extends TestCase
         $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('The hash field is required.');
 
-        SigningInput::fromArray(['algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256]);
+        SigningInput::fromArray(['algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value]);
     }
 
     public function testEmptyObjectThrowsMissingAlgorithm(): void
@@ -225,7 +225,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('The hash field must be a string.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => 42,
         ]);
     }
@@ -236,7 +236,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('The hash field must be a string.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => [],
         ]);
     }
@@ -247,7 +247,7 @@ class SigningInputTest extends TestCase
         $this->expectExceptionMessage('The hash field must be a string.');
 
         SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => null,
         ]);
     }
@@ -256,7 +256,7 @@ class SigningInputTest extends TestCase
     {
         $rawBytes = random_bytes(32);
         $input    = SigningInput::fromArray([
-            'algorithm' => SigningAlgorithm::RSA_PKCS1_V1_5_SHA256,
+            'algorithm' => SigningAlgorithm::RsaPkcs1V15Sha256->value,
             'hash' => base64_encode($rawBytes),
         ]);
 

@@ -46,7 +46,7 @@ final class SignController
 
         $this->logger->debug('sign completed', [
             'key'        => $keyName,
-            'algorithm'  => $input->algorithm,
+            'algorithm'  => $input->algorithm->value,
             'durationMs' => $durationMs,
             'backend'    => $backend->getName(),
         ]);
@@ -54,7 +54,7 @@ final class SignController
         $this->logger->info('Signing request processed', [
             'client'    => $client->name,
             'key'       => $keyName,
-            'algorithm' => $input->algorithm,
+            'algorithm' => $input->algorithm->value,
             'backend'   => $backend->getName(),
         ]);
 

@@ -6,6 +6,8 @@ namespace OpenConext\PrivateKeyAgent\Tests\Unit\Service;
 
 use OpenConext\PrivateKeyAgent\Backend\DecryptionBackendInterface;
 use OpenConext\PrivateKeyAgent\Backend\SigningBackendInterface;
+use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
+use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistry;
 use PHPUnit\Framework\TestCase;
@@ -25,12 +27,12 @@ class KeyRegistryTest extends TestCase
                 return true;
             }
 
-            public function sign(string $hash, string $algorithm): string
+            public function sign(string $hash, SigningAlgorithm $algorithm): string
             {
                 return '';
             }
 
-            public function decrypt(string $ciphertext, string $algorithm): string
+            public function decrypt(string $ciphertext, EncryptionAlgorithm $algorithm): string
             {
                 return '';
             }

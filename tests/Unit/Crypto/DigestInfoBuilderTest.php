@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace OpenConext\PrivateKeyAgent\Tests\Unit\Crypto;
 
-use InvalidArgumentException;
 use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
 use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use PHPUnit\Framework\TestCase;
@@ -17,7 +16,7 @@ class DigestInfoBuilderTest extends TestCase
     public function testPrependSha1(): void
     {
         $hash   = random_bytes(20);
-        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA1);
+        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RsaPkcs1V15Sha1);
 
         // SHA-1 DigestInfo prefix: 30 21 30 09 06 05 2b 0e 03 02 1a 05 00 04 14
         $expectedPrefix = hex2bin('3021300906052b0e03021a05000414');
@@ -27,7 +26,7 @@ class DigestInfoBuilderTest extends TestCase
     public function testPrependSha256(): void
     {
         $hash   = random_bytes(32);
-        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA256);
+        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RsaPkcs1V15Sha256);
 
         // SHA-256 DigestInfo prefix: 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20
         $expectedPrefix = hex2bin('3031300d060960864801650304020105000420');
@@ -37,7 +36,7 @@ class DigestInfoBuilderTest extends TestCase
     public function testPrependSha384(): void
     {
         $hash   = random_bytes(48);
-        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA384);
+        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RsaPkcs1V15Sha384);
 
         // SHA-384 DigestInfo prefix: 30 41 30 0d 06 09 60 86 48 01 65 03 04 02 02 05 00 04 30
         $expectedPrefix = hex2bin('3041300d060960864801650304020205000430');
@@ -47,17 +46,18 @@ class DigestInfoBuilderTest extends TestCase
     public function testPrependSha512(): void
     {
         $hash   = random_bytes(64);
-        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RSA_PKCS1_V1_5_SHA512);
+        $result = DigestInfoBuilder::prepend($hash, SigningAlgorithm::RsaPkcs1V15Sha512);
 
         // SHA-512 DigestInfo prefix: 30 51 30 0d 06 09 60 86 48 01 65 03 04 02 03 05 00 04 40
         $expectedPrefix = hex2bin('3051300d060960864801650304020305000440');
         $this->assertSame($expectedPrefix . $hash, $result);
     }
 
-    public function testPrependThrowsOnUnsupportedAlgorithm(): void
+    public function testPrependCoversAllCases(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Unsupported algorithm');
-        DigestInfoBuilder::prepend(random_bytes(32), 'rsa-pkcs1-v1_5-md5');
+        foreach (SigningAlgorithm::cases() as $algorithm) {
+            $result = DigestInfoBuilder::prepend(random_bytes(1), $algorithm);
+            $this->assertNotEmpty($result, 'prepend() returned empty result for ' . $algorithm->value);
+        }
     }
 }

@@ -19,68 +19,68 @@ class DecryptionInputTest extends TestCase
     {
         $ciphertext = random_bytes(256);
         $input      = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode($ciphertext),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_V1_5, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaPkcs1V15, $input->algorithm);
         $this->assertSame($ciphertext, $input->ciphertextBytes);
     }
 
     public function testValidOaepSha1(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1,
+            'algorithm' => EncryptionAlgorithm::RsaOaepMgf1Sha1->value,
             'encrypted_data' => base64_encode(random_bytes(256)),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaOaepMgf1Sha1, $input->algorithm);
     }
 
     public function testValidOaepSha224(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224,
+            'algorithm' => EncryptionAlgorithm::RsaOaepMgf1Sha224->value,
             'encrypted_data' => base64_encode(random_bytes(256)),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaOaepMgf1Sha224, $input->algorithm);
     }
 
     public function testValidOaepSha256(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256,
+            'algorithm' => EncryptionAlgorithm::RsaOaepMgf1Sha256->value,
             'encrypted_data' => base64_encode(random_bytes(256)),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaOaepMgf1Sha256, $input->algorithm);
     }
 
     public function testValidOaepSha384(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384,
+            'algorithm' => EncryptionAlgorithm::RsaOaepMgf1Sha384->value,
             'encrypted_data' => base64_encode(random_bytes(256)),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaOaepMgf1Sha384, $input->algorithm);
     }
 
     public function testValidOaepSha512(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512,
+            'algorithm' => EncryptionAlgorithm::RsaOaepMgf1Sha512->value,
             'encrypted_data' => base64_encode(random_bytes(256)),
         ]);
 
-        $this->assertSame(EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512, $input->algorithm);
+        $this->assertSame(EncryptionAlgorithm::RsaOaepMgf1Sha512, $input->algorithm);
     }
 
     public function testValidMinimumSize128Bytes(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(128)),
         ]);
 
@@ -90,7 +90,7 @@ class DecryptionInputTest extends TestCase
     public function testValidMaximumSize1024Bytes(): void
     {
         $input = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(1024)),
         ]);
 
@@ -125,7 +125,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded encrypted_data.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => "YQ==\n",
         ]);
     }
@@ -136,7 +136,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded encrypted_data.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(256)) . "\n",
         ]);
     }
@@ -147,7 +147,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded encrypted_data.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => 'dGVzdA-_dGVzdA==',
         ]);
     }
@@ -158,7 +158,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Invalid base64-encoded encrypted_data.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => '=dGVzdA==',
         ]);
     }
@@ -169,7 +169,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('The encrypted_data field must not be empty.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => '',
         ]);
     }
@@ -180,7 +180,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Encrypted data must be 128-1024 bytes, got 64 bytes.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(64)),
         ]);
     }
@@ -191,7 +191,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Encrypted data must be 128-1024 bytes, got 2048 bytes.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(2048)),
         ]);
     }
@@ -202,7 +202,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Encrypted data must be 128-1024 bytes, got 127 bytes.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(127)),
         ]);
     }
@@ -213,7 +213,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('Encrypted data must be 128-1024 bytes, got 1025 bytes.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode(random_bytes(1025)),
         ]);
     }
@@ -231,7 +231,7 @@ class DecryptionInputTest extends TestCase
         $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('The encrypted_data field is required.');
 
-        DecryptionInput::fromArray(['algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5]);
+        DecryptionInput::fromArray(['algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value]);
     }
 
     public function testEmptyObjectThrowsMissingAlgorithm(): void
@@ -281,7 +281,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('The encrypted_data field must be a string.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => 42,
         ]);
     }
@@ -292,7 +292,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('The encrypted_data field must be a string.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => [],
         ]);
     }
@@ -303,7 +303,7 @@ class DecryptionInputTest extends TestCase
         $this->expectExceptionMessage('The encrypted_data field must be a string.');
 
         DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => null,
         ]);
     }
@@ -312,7 +312,7 @@ class DecryptionInputTest extends TestCase
     {
         $rawBytes = random_bytes(256);
         $input    = DecryptionInput::fromArray([
-            'algorithm' => EncryptionAlgorithm::RSA_PKCS1_V1_5,
+            'algorithm' => EncryptionAlgorithm::RsaPkcs1V15->value,
             'encrypted_data' => base64_encode($rawBytes),
         ]);
 

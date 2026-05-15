@@ -408,7 +408,7 @@ Each entry in `keys` defines a logical key identity backed by a single PEM file.
 | `src/Command/` | Symfony console commands; currently `ValidateConfigCommand` for offline configuration validation |
 | `src/Config/` | Configuration loading (`ConfigLoader`, `ConfigProvider`) and immutable value objects for agent, key, and client configuration |
 | `src/Controller/` | REST API controllers: `SignController`, `DecryptController`, `HealthController` |
-| `src/Crypto/` | Low-level cryptographic utilities: `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing), `SigningAlgorithm` and `EncryptionAlgorithm` (algorithm identifier constants) |
+| `src/Crypto/` | Low-level cryptographic utilities: `DigestInfoBuilder` (DER-encodes the DigestInfo ASN.1 structure for PKCS#1 v1.5 signing), `SigningAlgorithm` and `EncryptionAlgorithm` (algorithm identifier enums) |
 | `src/ValueObject/` | Immutable input value objects (`SigningInput`, `DecryptionInput`) that validate and decode request data in their constructors |
 | `src/EventSubscriber/` | `ExceptionSubscriber` maps domain exceptions to RFC 6750 HTTP error responses |
 | `src/Exception/` | Domain exception hierarchy (`AuthenticationException`, `AccessDeniedException`, `BackendException`, `InvalidRequestException`, `InvalidConfigurationException`) |
@@ -590,12 +590,12 @@ interface BackendInterface
 
 interface SigningBackendInterface extends BackendInterface
 {
-    public function sign(string $hash, string $algorithm): string;
+    public function sign(string $hash, SigningAlgorithm $algorithm): string;
 }
 
 interface DecryptionBackendInterface extends BackendInterface
 {
-    public function decrypt(string $ciphertext, string $algorithm): string;
+    public function decrypt(string $ciphertext, EncryptionAlgorithm $algorithm): string;
 }
 ```
 
@@ -685,16 +685,19 @@ Both classes follow the same pattern:
 ```php
 final readonly class SigningInput
 {
-    private const array HASH_LENGTHS = [
-        SigningAlgorithm::RSA_PKCS1_V1_5_SHA1   => 20,
-        SigningAlgorithm::RSA_PKCS1_V1_5_SHA256 => 32,
-        SigningAlgorithm::RSA_PKCS1_V1_5_SHA384 => 48,
-        SigningAlgorithm::RSA_PKCS1_V1_5_SHA512 => 64,
-    ];
+    private function expectedHashLength(SigningAlgorithm $algorithm): int
+    {
+        return match ($algorithm) {
+            SigningAlgorithm::RsaPkcs1V15Sha1   => 20,
+            SigningAlgorithm::RsaPkcs1V15Sha256 => 32,
+            SigningAlgorithm::RsaPkcs1V15Sha384 => 48,
+            SigningAlgorithm::RsaPkcs1V15Sha512 => 64,
+        };
+    }
 
     public string $hashBytes;
 
-    private function __construct(public string $algorithm, string $hashBase64) { ... }
+    private function __construct(public SigningAlgorithm $algorithm, string $hashBase64) { ... }
 
     /** @param array<string, mixed> $data */
     public static function fromArray(array $data): self { ... }
@@ -713,7 +716,7 @@ final readonly class DecryptionInput
 {
     public string $ciphertextBytes;
 
-    private function __construct(public string $algorithm, string $encryptedDataBase64) { ... }
+    private function __construct(public EncryptionAlgorithm $algorithm, string $encryptedDataBase64) { ... }
 
     /** @param array<string, mixed> $data */
     public static function fromArray(array $data): self { ... }
@@ -722,7 +725,7 @@ final readonly class DecryptionInput
 
 Properties exposed after successful construction:
 
-- `$algorithm` — one of the six supported RSA decryption algorithm identifiers.
+- `$algorithm` — one of the six supported RSA decryption algorithm identifiers as an `EncryptionAlgorithm` enum.
 - `$ciphertextBytes` — raw binary ciphertext (decoded from the `encrypted_data` request field); length is validated to be 128–1024 bytes.
 
 > **Exact modulus-length check (backend responsibility):** The ciphertext must be exactly `modulus_bytes` long (e.g., 256 bytes for RSA-2048). This cannot be checked at input validation time because the key size is only known after the backend is resolved. Each decryption backend (`OpenSslDecryptionBackend`) validates `strlen(ciphertext) === $this->getModulusBytes()` before attempting decryption and throws `InvalidRequestException` (→ 400) on mismatch, not `BackendException` (→ 500).

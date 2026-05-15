@@ -6,6 +6,7 @@ namespace OpenConext\PrivateKeyAgent\Backend;
 
 use OpenConext\PrivateKeyAgent\Crypto\DigestInfoBuilder;
 use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
+use OpenConext\PrivateKeyAgent\Crypto\SigningAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\BackendException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenConext\PrivateKeyAgent\Exception\OpenSSLException;
@@ -27,15 +28,6 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
 {
     private OpenSSLAsymmetricKey $privateKey;
     private int $modulusBytes;
-
-    private const array ALGORITHM_MAP = [
-        EncryptionAlgorithm::RSA_PKCS1_V1_5            => ['padding' => OPENSSL_PKCS1_PADDING,      'digest' => null],
-        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA1   => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha1'],
-        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA224 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha224'],
-        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA256 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha256'],
-        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA384 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha384'],
-        EncryptionAlgorithm::RSA_PKCS1_OAEP_MGF1_SHA512 => ['padding' => OPENSSL_PKCS1_OAEP_PADDING, 'digest' => 'sha512'],
-    ];
 
     public function __construct(
         private readonly string $name,
@@ -85,7 +77,7 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         return true;
     }
 
-    public function sign(string $hash, string $algorithm): string
+    public function sign(string $hash, SigningAlgorithm $algorithm): string
     {
         $digestInfo = DigestInfoBuilder::prepend($hash, $algorithm);
 
@@ -102,7 +94,7 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         return $signature;
     }
 
-    public function decrypt(string $ciphertext, string $algorithm): string
+    public function decrypt(string $ciphertext, EncryptionAlgorithm $algorithm): string
     {
         if (strlen($ciphertext) !== $this->modulusBytes) {
             throw new InvalidRequestException(sprintf(
@@ -112,30 +104,27 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
             ));
         }
 
-        $spec = self::ALGORITHM_MAP[$algorithm] ?? null;
-        if ($spec === null) {
-            throw new BackendException(sprintf('Unsupported algorithm: %s', $algorithm));
-        }
+        [$padding, $digest] = self::decryptionSpec($algorithm);
 
         $decrypted = '';
 
         self::drainOpenSslErrorQueue();
 
         // PHP 8.5+ supports digest_algo named parameter for OAEP with SHA-2
-        if ($spec['digest'] !== null && $spec['digest'] !== 'sha1') {
+        if ($digest !== null && $digest !== 'sha1') {
             $result = openssl_private_decrypt(
                 $ciphertext,
                 $decrypted,
                 $this->privateKey,
-                $spec['padding'],
-                digest_algo: $spec['digest'],
+                $padding,
+                digest_algo: $digest,
             );
         } else {
             $result = openssl_private_decrypt(
                 $ciphertext,
                 $decrypted,
                 $this->privateKey,
-                $spec['padding'],
+                $padding,
             );
         }
 
@@ -144,6 +133,19 @@ final class OpenSslBackend implements SigningBackendInterface, DecryptionBackend
         }
 
         return $decrypted;
+    }
+
+    /** @return array{int, string|null} */
+    private static function decryptionSpec(EncryptionAlgorithm $algorithm): array
+    {
+        return match ($algorithm) {
+            EncryptionAlgorithm::RsaPkcs1V15       => [OPENSSL_PKCS1_PADDING, null],
+            EncryptionAlgorithm::RsaOaepMgf1Sha1   => [OPENSSL_PKCS1_OAEP_PADDING, 'sha1'],
+            EncryptionAlgorithm::RsaOaepMgf1Sha224 => [OPENSSL_PKCS1_OAEP_PADDING, 'sha224'],
+            EncryptionAlgorithm::RsaOaepMgf1Sha256 => [OPENSSL_PKCS1_OAEP_PADDING, 'sha256'],
+            EncryptionAlgorithm::RsaOaepMgf1Sha384 => [OPENSSL_PKCS1_OAEP_PADDING, 'sha384'],
+            EncryptionAlgorithm::RsaOaepMgf1Sha512 => [OPENSSL_PKCS1_OAEP_PADDING, 'sha512'],
+        };
     }
 
     private static function drainOpenSslErrorQueue(): void

@@ -8,7 +8,6 @@ use OpenConext\PrivateKeyAgent\Crypto\EncryptionAlgorithm;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 
 use function array_key_exists;
-use function in_array;
 use function is_string;
 use function sprintf;
 use function strlen;
@@ -20,12 +19,8 @@ final readonly class DecryptionInput
 
     public string $ciphertextBytes;
 
-    private function __construct(public string $algorithm, string $encryptedDataBase64)
+    private function __construct(public EncryptionAlgorithm $algorithm, string $encryptedDataBase64)
     {
-        if (! in_array($algorithm, EncryptionAlgorithm::ALL, true)) {
-            throw new InvalidRequestException('Invalid decryption algorithm.');
-        }
-
         $decoded = Base64Decoder::decode($encryptedDataBase64, 'encrypted_data');
 
         $len = strlen($decoded);
@@ -60,6 +55,9 @@ final readonly class DecryptionInput
             throw new InvalidRequestException('The encrypted_data field must be a string.');
         }
 
-        return new self($data['algorithm'], $data['encrypted_data']);
+        $algorithm = EncryptionAlgorithm::tryFrom($data['algorithm'])
+            ?? throw new InvalidRequestException('Invalid decryption algorithm.');
+
+        return new self($algorithm, $data['encrypted_data']);
     }
 }
