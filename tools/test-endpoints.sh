@@ -193,7 +193,7 @@ group_decrypt() {
             -pkeyopt rsa_padding_mode:oaep \
             -pkeyopt rsa_oaep_md:sha256 \
             -out "$tmp_enc" 2>/dev/null
-        base64 < "$tmp_enc"
+        base64 < "$tmp_enc" | tr -d '\n'
         rm -f "$tmp_pub" "$tmp_enc"
     }
 
