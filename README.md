@@ -29,12 +29,14 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 ### Supported algorithms
 
 **Signing:**
+
 - `rsa-pkcs1-v1_5-sha1`
 - `rsa-pkcs1-v1_5-sha256`
 - `rsa-pkcs1-v1_5-sha384`
 - `rsa-pkcs1-v1_5-sha512`
 
 **Decryption:**
+
 - `rsa-pkcs1-v1_5`
 - `rsa-pkcs1-oaep-mgf1-sha1`
 - `rsa-pkcs1-oaep-mgf1-sha224`
@@ -95,6 +97,7 @@ Run the setup script **from the project root** (not inside the container):
 ```
 
 The script:
+
 1. Generates RSA-2048 PEM keys in `config/keys/` for the OpenSSL backend.
 2. Writes a fresh `config/private-key-agent.yaml` with a randomly generated bearer token.
 
@@ -190,7 +193,7 @@ docker compose up -d
 |--------|---------|--------------|
 | `lint` | `composer lint` | phplint → PHPStan → PHP_CodeSniffer |
 | `test` | `composer test` | PHPUnit (Unit + Integration suites) |
-| `check` | `composer check` | phplint + PHPStan + `composer audit` + PHPUnit |
+| `check` | `composer check` | phplint + PHPStan + PHP_CodeSniffer + `composer audit` + PHPUnit |
 | `phpstan` | `composer phpstan` | Static analysis only |
 | `phpcs` | `composer phpcs` | Code style check only |
 | `phpcbf` | `composer phpcbf` | Auto-fix code style violations |
@@ -382,7 +385,7 @@ docker compose exec app bin/console app:validate-config --check-keys /path/to/co
 
 ## SimpleSAML integration
 
-The agent is designed to be used with the [`simplesamlphp/xml-security`](https://github.com/simplesamlphp/xml-security) library via two adapter classes — one implementing `SignatureBackend`, one implementing `EncryptionBackend`.
+The agent is designed to be used with the [`simplesamlphp/xml-security`](https://github.com/simplesamlphp/xml-security) library through an adapter library and a SimpleSAMLphp module. The adapter library implements `SignatureBackend` and `EncryptionBackend`; the SSP module registers custom algorithm classes via `registerAlgorithm()` so that signing and decryption are transparently delegated to the agent.
 
 ### How signing works (IdP)
 
@@ -408,6 +411,7 @@ The symmetric session key and the assertion content are **never sent to the agen
 
 ```php
 use SimpleSAML\XMLSecurity\Backend\SignatureBackend;
+use SimpleSAML\XMLSecurity\Key\KeyInterface;
 
 class PrivateKeyAgentSignatureBackend implements SignatureBackend
 {
@@ -417,9 +421,9 @@ class PrivateKeyAgentSignatureBackend implements SignatureBackend
         private readonly string $keyName,
     ) {}
 
-    public function sign(PrivateKey $key, string $plaintext): string
+    public function sign(KeyInterface $key, string $plaintext): string
     {
-        // Determine algorithm from $key (e.g. RSA + SHA-256 → rsa-pkcs1-v1_5-sha256)
+        // Determine algorithm from digest (e.g. SHA-256 → rsa-pkcs1-v1_5-sha256)
         $algorithm = 'rsa-pkcs1-v1_5-sha256';
         $hash = base64_encode(hash('sha256', $plaintext, true));
 
@@ -466,13 +470,12 @@ src/
 ├── Command/        # CLI commands (validate-config)
 ├── Config/         # Config loading and validation
 ├── Controller/     # Sign, Decrypt, Health endpoints
-├── Crypto/         # DigestInfo ASN.1 builder
-├── Dto/            # Request DTOs
+├── Crypto/         # Algorithm enums and DigestInfo ASN.1 builder
 ├── EventSubscriber/# Exception → JSON error response mapping
 ├── Exception/      # Domain exceptions
 ├── Security/       # Bearer-token authenticator and access control
 ├── Service/        # KeyRegistry (runtime key → backend mapping)
-└── Validator/      # Custom Symfony validators (Base64)
+└── ValueObject/    # Request value objects (SigningInput, DecryptionInput)
 ```
 
 ---
