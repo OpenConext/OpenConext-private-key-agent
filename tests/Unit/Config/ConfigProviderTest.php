@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace OpenConext\PrivateKeyAgent\Tests\Unit\Config;
 
 use OpenConext\PrivateKeyAgent\Config\ConfigProvider;
-use OpenConext\PrivateKeyAgent\Exception\BackendException;
+use OpenConext\PrivateKeyAgent\Exception\InvalidConfigurationException;
 use PHPUnit\Framework\TestCase;
 
 class ConfigProviderTest extends TestCase
@@ -31,7 +31,7 @@ class ConfigProviderTest extends TestCase
     {
         $provider = new ConfigProvider('');
 
-        $this->expectException(BackendException::class);
+        $this->expectException(InvalidConfigurationException::class);
         $this->expectExceptionMessage('Config path is not set');
         $provider->getConfig();
     }

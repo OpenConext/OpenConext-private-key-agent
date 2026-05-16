@@ -106,10 +106,9 @@ class DecryptControllerTest extends TestCase
         $this->controller->decrypt($request, 'my-key');
     }
 
-    public function testDecryptReturns400OnInvalidBody(): void
+    public function testDecryptThrowsOnInvalidBody(): void
     {
-        $backend = $this->createMock(DecryptionBackendInterface::class);
-        $this->registry->method('getDecryptionBackend')->willReturn($backend);
+        $this->registry->expects($this->never())->method('getDecryptionBackend');
 
         $request = new Request(
             content: (string) json_encode([

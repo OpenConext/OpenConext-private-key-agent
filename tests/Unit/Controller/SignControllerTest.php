@@ -82,10 +82,9 @@ class SignControllerTest extends TestCase
         $this->assertSame(base64_encode($signatureBytes), $body['signature']);
     }
 
-    public function testSignReturns400OnInvalidAlgorithm(): void
+    public function testSignThrowsOnInvalidAlgorithm(): void
     {
-        $backend = $this->createMock(SigningBackendInterface::class);
-        $this->registry->method('getSigningBackend')->willReturn($backend);
+        $this->registry->expects($this->never())->method('getSigningBackend');
 
         $request = new Request(
             content: (string) json_encode([
@@ -100,7 +99,7 @@ class SignControllerTest extends TestCase
         $this->controller->sign($request, 'my-key');
     }
 
-    public function testSignReturns401OnMissingToken(): void
+    public function testSignThrowsOnMissingToken(): void
     {
         $request = new Request(
             content: (string) json_encode([
@@ -114,8 +113,10 @@ class SignControllerTest extends TestCase
         $this->controller->sign($request, 'my-key');
     }
 
-    public function testSignReturns403OnUnauthorizedKey(): void
+    public function testSignThrowsOnUnauthorizedKey(): void
     {
+        $this->registry->expects($this->never())->method('getSigningBackend');
+
         $hash    = hash('sha256', 'test', true);
         $request = new Request(
             content: (string) json_encode([

@@ -91,9 +91,8 @@ class TokenAuthenticatorTest extends TestCase
         $authenticator->authenticate($request);
     }
 
-    public function testAuthenticateUsesTimingSafeComparison(): void
+    public function testAuthenticateResolvesCorrectClientFromMultipleClients(): void
     {
-        // Verifies the authenticator works with multiple clients and picks the right one
         $config = new AgentConfig(
             agentName: 'test-agent',
             keys: [],
