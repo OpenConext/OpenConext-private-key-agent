@@ -47,6 +47,9 @@ FROM prod AS dev
 
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*
 
+RUN docker-php-ext-enable xdebug
+COPY docker/xdebug.ini /usr/local/etc/php/conf.d/zz-xdebug.ini
+
 COPY --from=vendor-dev /var/www/html/vendor ./vendor
 COPY tests/ ./tests/
 COPY phpcs.xml phpunit.xml.dist phpstan.neon phpstan-baseline.neon .phplint.yml ./

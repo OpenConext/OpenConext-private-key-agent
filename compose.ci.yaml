@@ -1,0 +1,17 @@
+# Standalone compose file used by CI for smoke tests.
+# Uses the prod build target (vendor baked in, no runtime composer install)
+# and mounts only the runtime config and keys from the workspace.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: prod
+    env_file: .env
+    environment:
+      APP_ENV: prod
+    volumes:
+      - ./config/private-key-agent.yaml:/etc/private-key-agent/config.yaml:ro
+      - ./config/keys:/var/www/html/config/keys:ro
+    ports:
+      - "80:80"

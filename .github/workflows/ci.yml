@@ -83,7 +83,7 @@ jobs:
         run: ./tools/setup-dev.sh
 
       - name: Build and start services
-        run: docker compose up -d --build --wait
+        run: docker compose -f compose.ci.yaml up -d --build --wait
 
       - name: Wait for service to be healthy
         run: |
@@ -104,8 +104,8 @@ jobs:
 
       - name: Collect logs on failure
         if: failure()
-        run: docker compose logs
+        run: docker compose -f compose.ci.yaml logs
 
       - name: Stop services
         if: always()
-        run: docker compose down
+        run: docker compose -f compose.ci.yaml down
