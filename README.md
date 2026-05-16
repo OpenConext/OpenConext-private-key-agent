@@ -1,5 +1,8 @@
 # OpenConext Private Key Agent
 
+[![CI](https://github.com/OpenConext/OpenConext-private-key-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenConext/OpenConext-private-key-agent/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/OpenConext/OpenConext-private-key-agent/main/.github/badges/coverage.json)](https://github.com/OpenConext/OpenConext-private-key-agent/actions/workflows/ci.yml)
+
 A REST API service that performs RSA signing and decryption operations using protected private keys — without ever exposing the keys to callers. The agent runs in a separate process and user context, optionally on a separate host, from the services that consume it.
 
 > **Design specifications:** See [DESIGN-SPECIFICATION.md](docs/DESIGN-SPECIFICATION.md) for the full architecture, API contract, configuration reference, and implementation details.
