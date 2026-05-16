@@ -80,7 +80,9 @@ jobs:
           install: true
 
       - name: Set up dev environment (keys + config)
-        run: ./tools/setup-dev.sh
+        run: |
+          ./tools/setup-dev.sh
+          chmod 644 config/keys/*.pem
 
       - name: Build and start services
         run: docker compose -f compose.ci.yaml up -d --build --wait
