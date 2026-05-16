@@ -20,6 +20,7 @@ use Symfony\Component\HttpKernel\Event\ExceptionEvent;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\KernelEvents;
 
 use function json_decode;
 
@@ -39,6 +40,13 @@ class ExceptionSubscriberTest extends TestCase
         $this->logger     = $this->createMock(LoggerInterface::class);
         $this->subscriber = new ExceptionSubscriber($config, $this->logger);
         $this->kernel     = $this->createMock(HttpKernelInterface::class);
+    }
+
+    public function testGetSubscribedEventsReturnsExpectedMapping(): void
+    {
+        $this->assertSame([
+            KernelEvents::EXCEPTION => ['onKernelException', 0],
+        ], ExceptionSubscriber::getSubscribedEvents());
     }
 
     public function testInvalidRequestExceptionReturns400(): void

@@ -8,11 +8,11 @@ use OpenConext\PrivateKeyAgent\Config\ConfigLoader;
 use OpenConext\PrivateKeyAgent\Exception\InvalidConfigurationException;
 use PHPUnit\Framework\TestCase;
 
+use function file_exists;
 use function file_put_contents;
 use function sprintf;
 use function str_repeat;
-use function sys_get_temp_dir;
-use function tempnam;
+use function uniqid;
 use function unlink;
 
 class ConfigLoaderTest extends TestCase
@@ -75,15 +75,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [dupe]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('Duplicate key name');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -99,15 +98,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('key_path');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -121,15 +119,14 @@ keys:
     operations: [sign]
 clients: []
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('At least one client');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -146,15 +143,14 @@ clients:
     token: ""
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('at least 32 characters');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -171,30 +167,28 @@ clients:
     token: short-token
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('at least 32 characters');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
     public function testLoadThrowsOnNonArrayKeys(): void
     {
         $yaml    = "agent_name: test-agent\nkeys: bad-string\nclients:\n  - name: c1\n    token: test-token-value-at-least-32-chars-long\n    allowed_keys: []\n";
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('"keys"');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -209,15 +203,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: []
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('"keys"');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -232,15 +225,14 @@ keys:
 clients:
   - bad-scalar-entry
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('"clients"');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -256,15 +248,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: []
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('Key must have a name');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -280,15 +271,14 @@ clients:
   - token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('Client must have a name');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -304,15 +294,14 @@ clients:
   - name: c1
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('token');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -325,15 +314,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('At least one key must be configured');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -347,15 +335,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('At least one key must be configured');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -372,15 +359,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('[a-zA-Z0-9_-]{1,64}');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -391,15 +377,14 @@ YAML;
             "agent_name: test-agent\nkeys:\n  - name: \"%s\"\n    key_path: /tmp/key.pem\n    operations: [sign]\nclients:\n  - name: c1\n    token: test-token-value-at-least-32-chars-long\n    allowed_keys: [k1]\n",
             $longName,
         );
-        $tmpFile  = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile  = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('[a-zA-Z0-9_-]{1,64}');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -419,15 +404,14 @@ clients:
     token: another-token-value-at-least-32-chars-long
     allowed_keys: [k1]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('Duplicate client name');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -444,15 +428,14 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: []
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('allowed_keys must be a non-empty list');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -468,15 +451,14 @@ clients:
   - name: c1
     token: test-token-value-at-least-32-chars-long
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('allowed_keys must be a non-empty list');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -493,15 +475,38 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: [123]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $this->expectException(InvalidConfigurationException::class);
             $this->expectExceptionMessage('allowed_keys entries must be non-empty strings');
             ConfigLoader::load($tmpFile);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
+        }
+    }
+
+    public function testLoadThrowsWhenClientReferencesUnknownAllowedKey(): void
+    {
+        $yaml    = <<<'YAML'
+agent_name: test-agent
+keys:
+  - name: k1
+    key_path: /tmp/key.pem
+    operations: [sign]
+clients:
+  - name: c1
+    token: test-token-value-at-least-32-chars-long
+    allowed_keys: [missing-key]
+YAML;
+        $tmpFile = $this->createScratchConfigFile($yaml);
+
+        try {
+            $this->expectException(InvalidConfigurationException::class);
+            $this->expectExceptionMessage('references unknown key "missing-key"');
+            ConfigLoader::load($tmpFile);
+        } finally {
+            $this->deleteScratchFile($tmpFile);
         }
     }
 
@@ -518,14 +523,30 @@ clients:
     token: test-token-value-at-least-32-chars-long
     allowed_keys: ["*"]
 YAML;
-        $tmpFile = tempnam(sys_get_temp_dir(), 'cfg_') . '.yaml';
-        file_put_contents($tmpFile, $yaml);
+        $tmpFile = $this->createScratchConfigFile($yaml);
 
         try {
             $config = ConfigLoader::load($tmpFile);
             $this->assertSame(['*'], $config->clients[0]->allowedKeys);
         } finally {
-            unlink($tmpFile);
+            $this->deleteScratchFile($tmpFile);
         }
+    }
+
+    private function createScratchConfigFile(string $contents): string
+    {
+        $path = __DIR__ . '/../../fixtures/config-loader-' . uniqid('', true) . '.yaml';
+        file_put_contents($path, $contents);
+
+        return $path;
+    }
+
+    private function deleteScratchFile(string $path): void
+    {
+        if (! file_exists($path)) {
+            return;
+        }
+
+        unlink($path);
     }
 }

@@ -13,6 +13,7 @@ use OpenConext\PrivateKeyAgent\Exception\AccessDeniedException;
 use OpenConext\PrivateKeyAgent\Exception\AuthenticationException;
 use OpenConext\PrivateKeyAgent\Exception\InvalidRequestException;
 use OpenConext\PrivateKeyAgent\Exception\KeyNotFoundException;
+use OpenConext\PrivateKeyAgent\Exception\OpenSSLException;
 use OpenConext\PrivateKeyAgent\Security\AccessControlService;
 use OpenConext\PrivateKeyAgent\Security\TokenAuthenticator;
 use OpenConext\PrivateKeyAgent\Service\KeyRegistryInterface;
@@ -173,6 +174,26 @@ class DecryptControllerTest extends TestCase
         $request->headers->set('Content-Type', 'application/json');
 
         $this->expectException(KeyNotFoundException::class);
+        $this->controller->decrypt($request, 'my-key');
+    }
+
+    public function testDecryptThrowsInvalidRequestWhenBackendRaisesOpenSslException(): void
+    {
+        $backend = $this->createMock(DecryptionBackendInterface::class);
+        $backend->method('decrypt')->willThrowException(new OpenSSLException('OpenSSL failed'));
+        $this->registry->method('getDecryptionBackend')->with('my-key')->willReturn($backend);
+
+        $request = new Request(
+            content: (string) json_encode([
+                'algorithm' => 'rsa-pkcs1-v1_5',
+                'encrypted_data' => base64_encode(random_bytes(256)),
+            ]),
+        );
+        $request->headers->set('Authorization', 'Bearer test-token');
+        $request->headers->set('Content-Type', 'application/json');
+
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('Decryption failed');
         $this->controller->decrypt($request, 'my-key');
     }
 }

@@ -39,6 +39,46 @@ class KeyRegistryTest extends TestCase
         };
     }
 
+    private function createSigningBackendOnly(): SigningBackendInterface
+    {
+        return new class implements SigningBackendInterface {
+            public function getName(): string
+            {
+                return 'test-key';
+            }
+
+            public function isHealthy(): bool
+            {
+                return true;
+            }
+
+            public function sign(string $hash, SigningAlgorithm $algorithm): string
+            {
+                return '';
+            }
+        };
+    }
+
+    private function createDecryptionBackendOnly(): DecryptionBackendInterface
+    {
+        return new class implements DecryptionBackendInterface {
+            public function getName(): string
+            {
+                return 'test-key';
+            }
+
+            public function isHealthy(): bool
+            {
+                return true;
+            }
+
+            public function decrypt(string $ciphertext, EncryptionAlgorithm $algorithm): string
+            {
+                return '';
+            }
+        };
+    }
+
     public function testGetSigningBackendReturnsRegisteredBackend(): void
     {
         $backend  = $this->createBackend();
@@ -93,6 +133,26 @@ class KeyRegistryTest extends TestCase
         $registry->register('my-key', $backend, ['sign']);
 
         $this->expectException(KeyNotFoundException::class);
+        $registry->getDecryptionBackend('my-key');
+    }
+
+    public function testGetSigningBackendThrowsWhenRegisteredBackendDoesNotImplementSigningInterface(): void
+    {
+        $registry = new KeyRegistry();
+        $registry->register('my-key', $this->createDecryptionBackendOnly(), ['sign']);
+
+        $this->expectException(KeyNotFoundException::class);
+        $this->expectExceptionMessage('my-key');
+        $registry->getSigningBackend('my-key');
+    }
+
+    public function testGetDecryptionBackendThrowsWhenRegisteredBackendDoesNotImplementDecryptionInterface(): void
+    {
+        $registry = new KeyRegistry();
+        $registry->register('my-key', $this->createSigningBackendOnly(), ['decrypt']);
+
+        $this->expectException(KeyNotFoundException::class);
+        $this->expectExceptionMessage('my-key');
         $registry->getDecryptionBackend('my-key');
     }
 

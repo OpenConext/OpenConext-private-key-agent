@@ -60,4 +60,12 @@ class Base64DecoderTest extends TestCase
 
         Base64Decoder::decode('', 'encrypted_data');
     }
+
+    public function testThrowsWhenStrictBase64DecodeFailsAfterRegexValidation(): void
+    {
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('Invalid base64-encoded field.');
+
+        Base64Decoder::decode('=', 'field');
+    }
 }
