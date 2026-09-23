@@ -22,7 +22,7 @@
         "phpstan/phpstan": "^2.1",
         "phpstan/phpstan-phpunit": "^2.0",
         "phpstan/phpstan-symfony": "^2.0",
-        "phpunit/phpunit": "^11.0",
+        "phpunit/phpunit": "^13.3",
         "squizlabs/php_codesniffer": "^4.0",
         "symfony/dotenv": "^7.4"
     },
