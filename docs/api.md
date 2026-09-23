@@ -13,6 +13,9 @@ All API routes are prefixed with `/v1/`:
 http(s)://<host>/v1/<endpoint>
 ```
 
+The agent itself serves plain HTTP. Use `https://` through a TLS-terminating proxy for any client that
+is not on the same host; see [SECURITY.md](../SECURITY.md#plain-http-no-tls).
+
 ### Authentication
 
 All endpoints except the health endpoints require a **static pre-shared Bearer token** as defined in
@@ -21,6 +24,10 @@ All endpoints except the health endpoints require a **static pre-shared Bearer t
 ```text
 Authorization: Bearer <token>
 ```
+
+Tokens are static: they do not expire and stay valid until they are removed from the agent's
+configuration. Treat a token as equivalent to the private keys it unlocks; see
+[SECURITY.md](../SECURITY.md#static-bearer-tokens).
 
 **Health endpoints (`GET /v1/health` and `GET /v1/health/key/{keyName}`) do not require
 authentication** and can be called without an `Authorization` header.

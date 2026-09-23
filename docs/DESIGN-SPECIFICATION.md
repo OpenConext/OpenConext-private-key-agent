@@ -108,6 +108,10 @@ The agent only performs private key operations. It does not process the actual m
 
 This design keeps the agent simple, minimises the size of the REST API calls, and aligns with its primary goal: protecting private keys. XML documents, certificates, and other high-level data are never sent to the agent.
 
+### Security boundary
+
+The agent protects the keys, not the channel to it. Transport encryption (TLS), network isolation, the token lifecycle (expiry and rotation) and abuse protection (rate limiting) are deliberately left to the deployment environment to keep the agent small. [SECURITY.md](../SECURITY.md) lists the required deployment environment and the rationale for each of these decisions.
+
 ### Scope of access control
 
 Each client can be allowed access to multiple private keys. More fine-grained access control, such as specifying which operations a client may perform on a key, is not implemented. This could be added later if needed.
@@ -168,6 +172,8 @@ All endpoints except `/v1/health` and `/v1/health/key/{key_name}` require a Bear
 >
 > The field `allowed_keys` is a list of logical **key names** (matching key `name` values) that the client is authorised to use. It is not a set of cryptographic keys or client certificates.
 
+Tokens never expire, are stored in plaintext in the configuration file and stay valid until an operator removes them. The API is served over plain HTTP. Both are deliberate; see [SECURITY.md — Static bearer tokens](../SECURITY.md#static-bearer-tokens) and [Plain HTTP, no TLS](../SECURITY.md#plain-http-no-tls) for the consequences and the rotation procedure.
+
 ### Rate limiting
 
 Rate limiting is **deliberately out of scope** for this application. It is assumed to be handled by the upstream infrastucture.
@@ -188,7 +194,8 @@ Rate limiting and brute-force protection are infrastructure responsibilities bes
 
 > **Deployer note:** If this agent is exposed to untrusted networks, configure rate limiting in the
 > infrastructure layer before requests reach the application. The application itself will always
-> return `401 Unauthorized` for invalid tokens, never `429 Too Many Requests`.
+> return `401 Unauthorized` for invalid tokens, never `429 Too Many Requests`. See
+> [SECURITY.md](../SECURITY.md#required-deployment-environment) for the full list of requirements.
 
 ### Request body size limits
 
@@ -255,7 +262,7 @@ Response `200`:
 
 ### `GET /v1/health`
 
-No authentication required. Returns `200` if all backends are healthy, `503` otherwise.
+No authentication required. Returns `200` if all backends are healthy, `503` otherwise. The health endpoints reveal key names and key health, so expose them only to monitoring; see [SECURITY.md](../SECURITY.md#unauthenticated-health-endpoints).
 
 Response `200`:
 
@@ -323,6 +330,8 @@ All error responses follow RFC 6750 and use this JSON structure:
 
 The HTTP status code in the response body must match the actual HTTP response status code.
 
+For `400` responses to authenticated requests, `message` describes what is wrong with the input (for example a hash length that does not match the algorithm). Decryption failures always return the same generic message. See [SECURITY.md — Descriptive validation errors](../SECURITY.md#descriptive-validation-errors) for why this is acceptable.
+
 On `401`, the response also includes the `WWW-Authenticate` header:
 
 ```
@@ -349,11 +358,12 @@ The agent configuration is loaded from a YAML file at runtime. The path is set v
 
 The path to the configuration file is read from the `PRIVATE_KEY_AGENT_CONFIG` environment variable, resolved by Symfony's DI container via `services.yaml`.
 
-Values inside the config file (e.g. `token`) are plain strings — `ConfigLoader` uses `Symfony\Component\Yaml::parseFile()` directly and does **not** resolve `%env(...)%` references. Sensitive values must be supplied as plaintext strings or via a secrets management solution external to the agent (e.g. a mounted secrets file, Docker/Kubernetes secrets written to the config file on startup).
+Values inside the config file (e.g. `token`) are plain strings — `ConfigLoader` uses `Symfony\Component\Yaml::parseFile()` directly and does **not** resolve `%env(...)%` references. Sensitive values must be supplied as plaintext strings or via a secrets management solution external to the agent (e.g. a mounted secrets file, Docker/Kubernetes secrets written to the config file on startup). Restrict the file to the agent's service user; see [SECURITY.md](../SECURITY.md#required-deployment-environment).
 
 ### Example config file
 
 ```yaml
+# Holds plaintext tokens that never expire. Read SECURITY.md before deploying.
 agent_name: my-private-key-agent
 
 keys:
@@ -389,7 +399,7 @@ Each entry in `keys` defines a logical key identity backed by a single PEM file.
 #### Client
 
 - `name`: Name of the client. Used in logs for identification.
-- `token`: The bearer token the client sends in `Authorization: Bearer <value>`. This is the token itself, not an OAuth2 client secret used to obtain a token. Compared using `hash_equals()` to prevent timing attacks.
+- `token`: The bearer token the client sends in `Authorization: Bearer <value>`. This is the token itself, not an OAuth2 client secret used to obtain a token. Compared using `hash_equals()` to prevent timing attacks. Must be at least 32 characters; provision at least 256 bits of randomness. The token has no expiry — rotate it as described in [SECURITY.md — Rotating a token](../SECURITY.md#rotating-a-token).
 - `allowed_keys`: List of logical key names (matching key `name` values) that this client is permitted to use. Use `["*"]` to grant access to all configured keys.
 
 ---
@@ -796,7 +806,7 @@ OPcache and PHP runtime settings are stored in `docker/app.ini` instead of being
 
 The compose file is intended for development. Single service:
 
-- `app`: Apache+PHP container (`dev` stage), mounts the application source tree under `/var/www/html`, config file, and `docker/app.dev.ini` as read-only volumes. Exposes port 80. The `PRIVATE_KEY_AGENT_CONFIG` environment variable must be supplied via a `.env` file or shell environment.
+- `app`: Apache+PHP container (`dev` stage), mounts the application source tree under `/var/www/html`, config file, and `docker/app.dev.ini` as read-only volumes. Exposes plain HTTP on port 80, published on all host interfaces — suitable for local development only; see [SECURITY.md](../SECURITY.md#plain-http-no-tls). The `PRIVATE_KEY_AGENT_CONFIG` environment variable must be supplied via a `.env` file or shell environment.
 
 ---
 

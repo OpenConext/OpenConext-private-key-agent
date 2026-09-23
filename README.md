@@ -7,6 +7,8 @@ A REST API service that performs RSA signing and decryption operations using pro
 
 > **Design specifications:** See [DESIGN-SPECIFICATION.md](docs/DESIGN-SPECIFICATION.md) for the full architecture, API contract, configuration reference, and implementation details.
 
+> **Security:** by design the agent serves plain HTTP and uses static bearer tokens that never expire. It must run in an environment that provides TLS, network isolation and token rotation. Read [SECURITY.md](SECURITY.md) before deploying it anywhere other than your own machine.
+
 ---
 
 ## Overview
@@ -52,9 +54,9 @@ Services like SimpleSAMLphp need to sign SAML assertions and decrypt RSA-encrypt
 - **Fail-fast configuration:** invalid or missing config prevents the application container from starting.
 - **Health endpoints:** `/v1/health` and `/v1/health/key/{key_name}` for liveness probes and monitoring.
 
-> **Rate limiting** is deliberately out of scope for this application. Protection against bearer-token
-> brute-force attacks is an infrastructure responsibility (WAF, reverse proxy, Kubernetes Ingress).
-> See the [Design Specification](docs/DESIGN-SPECIFICATION.md) for the rationale.
+> **TLS, rate limiting and token rotation** are deliberately out of scope for this application. They
+> are infrastructure responsibilities (reverse proxy, WAF, Kubernetes Ingress, secrets manager).
+> See [SECURITY.md](SECURITY.md) for the required deployment environment and the rationale.
 
 ### Technology stack
 
@@ -167,7 +169,7 @@ The private key files are **unencrypted and ephemeral** — suitable only for lo
 
 `setup-dev.sh` generates a random 256-bit hex token per run and writes it into `config/private-key-agent.yaml`. It is printed to the terminal on completion.
 
-> **Production equivalent:** generate a cryptographically random token of at least 256 bits and inject it into the config file via your secrets management solution (Docker secrets, Kubernetes secret, Vault, etc.). Each client should have its own token. **Never reuse the development token in production.**
+> **Production equivalent:** generate a cryptographically random token of at least 256 bits and inject it into the config file via your secrets management solution (Docker secrets, Kubernetes secret, Vault, etc.). Each client should have its own token. **Never reuse the development token in production.** Tokens never expire, so plan rotation up front: see [SECURITY.md — Rotating a token](SECURITY.md#rotating-a-token).
 
 #### Summary: dev → production mapping
 
@@ -176,6 +178,9 @@ The private key files are **unencrypted and ephemeral** — suitable only for lo
 | Unencrypted PEM key in `config/keys/` | PEM key with restricted filesystem permissions, or secrets-manager-mounted key |
 | Hardcoded token in `config/private-key-agent.yaml` | Randomly generated token injected at deploy time via secrets management |
 | Single `dev-client` with access to all keys | One client entry per consuming service, with `allowed_keys` scoped to only the keys that service needs |
+| Plain HTTP on port 80, published on all host interfaces | Agent port reachable only by its consumers, with TLS terminated in front of it whenever traffic leaves the host |
+
+The full list of production requirements is in [SECURITY.md](SECURITY.md#required-deployment-environment).
 
 ---
 
@@ -290,8 +295,8 @@ End-to-end HTTP tests against the running stack (run from the host, not inside t
 # Verbose + single group
 ./tools/test-endpoints.sh -v sign
 
-# Target a different host
-BASE_URL=http://agent.example.com ./tools/test-endpoints.sh
+# Target a different host (use HTTPS for anything other than localhost — see SECURITY.md)
+BASE_URL=https://agent.example.com ./tools/test-endpoints.sh
 ```
 
 The script reads the bearer token from `config/private-key-agent.yaml` automatically. Docker Compose must be running.
@@ -317,8 +322,8 @@ brew install hey
 # Combined options
 ./tools/perf-test.sh -c 10 -d 15s sign
 
-# Target a different host
-BASE_URL=http://agent.example.com ./tools/perf-test.sh
+# Target a different host (use HTTPS for anything other than localhost — see SECURITY.md)
+BASE_URL=https://agent.example.com ./tools/perf-test.sh
 ```
 
 The script runs a sanity check (HTTP 200) before each benchmark and skips the endpoint if the check fails.
@@ -353,9 +358,12 @@ Reports known vulnerabilities in installed packages via the Packagist Security A
 
 The agent is configured from a single YAML file. The path is set via the `PRIVATE_KEY_AGENT_CONFIG` environment variable (default in Docker Compose: `/etc/private-key-agent/config.yaml`).
 
+The file holds client tokens in plaintext. Make it readable only by the agent's service user and deliver it through a secrets manager; see [SECURITY.md](SECURITY.md) for this and the other deployment requirements.
+
 ### Minimal example
 
 ```yaml
+# Holds plaintext tokens that never expire. Read SECURITY.md before deploying.
 agent_name: my-private-key-agent
 
 keys:

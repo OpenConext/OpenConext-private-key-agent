@@ -9,6 +9,8 @@ services:
       - .:/var/www/html
       - ./config/private-key-agent.yaml:/etc/private-key-agent/config.yaml:ro
       - ./docker/app.dev.ini:/usr/local/etc/php/conf.d/zz-app-local.ini:ro
+    # Local development only: publishes plain HTTP on all host interfaces.
+    # See SECURITY.md for production requirements.
     ports:
       - "80:80"
     restart: unless-stopped
