@@ -8,12 +8,12 @@
         "symfony/console": "^7.4",
         "symfony/flex": "^2.0",
         "symfony/framework-bundle": "^7.4",
-        "symfony/monolog-bundle": "^3.10",
-        "symfony/property-access": "^7.4",
-        "symfony/runtime": "^7.4",
-        "symfony/serializer": "^7.4",
+        "symfony/monolog-bundle": "^4.1",
+        "symfony/property-access": "^8.1",
+        "symfony/runtime": "^8.1",
+        "symfony/serializer": "^8.1",
         "symfony/translation-contracts": "^3.7",
-        "symfony/yaml": "^7.4"
+        "symfony/yaml": "^8.1"
     },
     "require-dev": {
         "doctrine/coding-standard": "^14.0",
@@ -24,7 +24,7 @@
         "phpstan/phpstan-symfony": "^2.0",
         "phpunit/phpunit": "^11.0",
         "squizlabs/php_codesniffer": "^4.0",
-        "symfony/dotenv": "^7.4"
+        "symfony/dotenv": "^8.1"
     },
     "autoload": {
         "psr-4": {
