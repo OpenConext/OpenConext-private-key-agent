@@ -40,4 +40,5 @@ Ensure Docker Compose is running (`docker compose up -d`) before running the scr
 ## Conventions
 
 - **Security First**: The service design aims to protect private keys; keep the REST API surface small and exchange only necessary cryptographic data (no full documents or certificates).
+- **Security trade-offs**: Plain HTTP, static non-expiring tokens, no rate limiting, unauthenticated health endpoints and descriptive validation errors are deliberate and documented in `SECURITY.md`. Update `SECURITY.md` whenever a change affects transport, authentication, error responses or supported algorithms.
 - **Error Handling**: Use the errors defined in RFC 6750 for client authentication and invalid requests.
