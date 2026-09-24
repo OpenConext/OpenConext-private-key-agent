@@ -10,15 +10,6 @@ A bearer token is as powerful as the private keys it unlocks: whoever holds a cl
 and decrypt with every key that client may use, for as long as the token is configured. Most of the
 requirements below exist to keep tokens from leaking.
 
-## Reporting a vulnerability
-
-> **TODO:** Placeholder section for rules when reporting security issues.
-
-Behaviour described under [Design decisions and known limitations](#design-decisions-and-known-limitations)
-is intended and is not treated as a vulnerability. A way to break one of the guarantees under
-[What the agent protects](#what-the-agent-protects), in an environment that meets the
-[requirements](#required-deployment-environment), is.
-
 ## Required deployment environment
 
 Do not run the agent outside local development until your environment provides all of the following.
